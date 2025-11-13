@@ -6,8 +6,6 @@ Quick reference for AI agents maintaining and extending this Rust CLI tool.
 
 **What**: Rust CLI for Atlassian with field optimization and ADF support
 **Stack**: Rust 2024 (1.91.1+), clap, Tokio, reqwest
-**Tests**: `cargo test` (120 tests)
-**Binary**: 3.8MB optimized
 **Commands**: config (5), jira (8), confluence (6)
 
 ---
@@ -318,34 +316,9 @@ cargo test -- --nocapture
 cargo test jira::adf  # Specific module
 ```
 
-### Binary Size Too Large
-
-**Check profile**:
-```toml
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-strip = true
-```
-
-Expected: 3.8MB
-
 ---
 
-## Testing Strategy
-
-**Test breakdown** (120 total):
-```
-config.rs:       13 tests  # Config loading, priority, validation
-http.rs:         3 tests   # Client creation, auth
-filter.rs:       3 tests   # Dead code (not used in CLI)
-test_utils.rs:   3 tests   # Helper functions
-jira/adf.rs:     35 tests  # ADF validation, conversion
-jira/api.rs:     27 tests  # 8 operations
-jira/fields.rs:  18 tests  # Field resolution, priority
-confluence/api.rs: 18 tests # 6 operations
-```
+## Testing
 
 **Run tests**:
 ```bash
@@ -353,18 +326,6 @@ cargo test                  # All tests
 cargo test jira::adf       # Module tests
 cargo test -- --nocapture  # With output
 ```
-
----
-
-## Performance Characteristics
-
-| Metric | Value | Notes |
-|--------|-------|-------|
-| Binary size | 3.8MB | LTO + strip enabled |
-| Build time (release) | ~30s | Single codegen unit |
-| Test time | < 1s | 120 tests |
-| Field optimization | 60-70% | 17 vs 50+ fields |
-| API call overhead | ~500ms | Network dependent |
 
 ---
 
@@ -399,8 +360,8 @@ CONFLUENCE_CUSTOM_INCLUDES=ancestors,history
 
 ```bash
 cargo build                # Development
-cargo build --release      # Optimized (3.8MB)
-cargo test                 # 120 tests
+cargo build --release      # Optimized
+cargo test                 # Run tests
 cargo clippy -- -D warnings # Zero warnings policy
 cargo fmt                  # Format
 ```
@@ -418,17 +379,17 @@ strip = true        # Remove debug symbols
 
 ## Dependencies
 
-| Crate | Version | Purpose |
-|-------|---------|---------|
-| clap | 4.5 | CLI parsing (derive API) |
-| tokio | 1.48 | Async runtime |
-| reqwest | 0.12 | HTTP client (rustls, no OpenSSL) |
-| serde_json | 1.0 | JSON serialization |
-| anyhow | 1.0 | Error handling |
-| toml | 0.9 | Config file parsing |
-| dirs | 6.0 | Platform-specific paths |
+See `Cargo.toml` for exact versions.
 
-**No unused dependencies**. All features justified.
+| Crate | Purpose |
+|-------|---------|
+| clap | CLI parsing (derive API) |
+| tokio | Async runtime |
+| reqwest | HTTP client (rustls, no OpenSSL) |
+| serde_json | JSON serialization |
+| anyhow | Error handling |
+| toml | Config file parsing |
+| dirs | Platform-specific paths |
 
 ---
 
@@ -442,7 +403,3 @@ strip = true        # Remove debug symbols
 ---
 
 **This guide is optimized for AI agents: project-specific knowledge only, no general Rust/HTTP/JSON concepts.**
-
-**Version**: 0.1.0
-**Tests**: 120 passing
-**Production-ready**: Yes
