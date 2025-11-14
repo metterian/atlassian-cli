@@ -1,92 +1,226 @@
 ---
 name: jira-confluence
-description: Atlassian CLI for Jira issues and Confluence wiki pages. Use when querying issues with JQL, searching pages with CQL, managing sprint workflows, creating/updating tickets or pages, handling ADF rich text, or automating bulk operations. Supports 14 operations across Jira and Confluence Cloud APIs.
-allowed-tools: [Bash, Read]
+version: 0.1.0
+description: Atlassian Cloud CLI for Jira and Confluence. Use for JQL/CQL queries, creating/updating issues, managing pages, transitions, comments, bulk operations, or ADF formatting. Project-specific development skill with codebase integration. Triggers - Jira tickets, sprint planning, Confluence docs, issue tracking, wiki pages, CLI development.
+allowed-tools: [Bash, Read, Grep, Glob]
 ---
 
-# Jira & Confluence CLI Expert Guide
+# Jira & Confluence CLI Expert (Project Developer Skill)
 
-Expert guide for the `atlassian` CLI tool for Jira and Confluence Cloud APIs.
+Developer-focused skill for the `atlassian` CLI project. Includes CLI usage + codebase integration knowledge.
 
-## Authentication
+**Context**: This skill is project-level and has access to codebase information (see [CLAUDE.md](../../CLAUDE.md)).
 
-**4-tier priority** (highest to lowest):
-1. **CLI flags**: `--domain company.atlassian.net --email user@example.com --token TOKEN`
-2. **Environment variables**: `ATLASSIAN_DOMAIN`, `ATLASSIAN_EMAIL`, `ATLASSIAN_API_TOKEN`
+## Project Integration
+
+**Binary location**: `target/release/atlassian` (development) or `~/.local/bin/atlassian` (installed)
+
+**Development workflow**:
+```bash
+# Build and test
+cargo build --release
+cargo test
+
+# Install locally
+./install.sh
+
+# Test with local config
+./target/release/atlassian config show
+```
+
+**Related files**:
+- `CLAUDE.md` - Developer guide (architecture, patterns)
+- `README.md` - User documentation
+- `src/jira/api.rs` - Jira operations
+- `src/confluence/api.rs` - Confluence operations
+- `src/config.rs` - 4-tier configuration system
+
+## Quick Start
+
+**Check installation**:
+```bash
+atlassian --version
+# or during development:
+./target/release/atlassian --version
+```
+
+**Configuration check**:
+```bash
+atlassian config show
+```
+
+## Authentication (4-Tier Priority)
+
+1. **CLI flags** (highest): `--domain company.atlassian.net --email user@example.com --token TOKEN`
+2. **Environment**: `ATLASSIAN_DOMAIN`, `ATLASSIAN_EMAIL`, `ATLASSIAN_API_TOKEN`
 3. **Project config**: `./.atlassian.toml`
 4. **Global config**: `~/.config/atlassian-cli/config.toml`
 
 **Domain format**: `company.atlassian.net` (NOT `https://company.atlassian.net`)
 
-**Multi-tenant**: Use `--profile work` for multiple Atlassian instances.
+**Implementation**: See `config.rs:load()` for priority resolution logic.
 
-## Jira Operations (8 commands)
+## Jira Operations (8 Commands)
 
-| Operation | Syntax | Returns |
-|-----------|--------|---------|
-| **Get issue** | `atlassian jira get PROJ-123` | Direct issue object |
-| **Search** | `atlassian jira search "<JQL>" --limit N --fields a,b` | `{"items": [...], "total": N}` |
-| **Create** | `atlassian jira create PROJ "Title" Bug --description "text"` | `{"key": "PROJ-123", "id": "..."}` |
-| **Update** | `atlassian jira update PROJ-123 '{"summary":"New"}'` | `{}` (empty = success) |
-| **Comment add** | `atlassian jira comment add PROJ-123 "Comment text"` | `{"id": "..."}` |
-| **Comment update** | `atlassian jira comment update PROJ-123 <ID> "New text"` | `{"id": "..."}` |
-| **List transitions** | `atlassian jira transitions PROJ-123` | Array of `{id, name, to: {name}}` |
-| **Execute transition** | `atlassian jira transition PROJ-123 <ID>` | `{}` (empty = success) |
+### Get Issue
+```bash
+atlassian jira get PROJ-123
+# Returns: Direct issue object with fields
+```
 
-**ADF Support**: `--description` and comment text accept plain text (auto-converted to ADF) or JSON ADF object.
+**Implementation**: `jira/api.rs:get_issue()` - GET `/rest/api/3/issue/{key}`
 
-## Confluence Operations (6 commands)
+### Search Issues (JQL)
+```bash
+atlassian jira search "assignee = currentUser() AND status != Done" --limit 50
+atlassian jira search "project = PROJ ORDER BY priority DESC" --fields key,summary,status
 
-| Operation | Syntax | Returns |
-|-----------|--------|---------|
-| **Search** | `atlassian confluence search "<CQL>" --limit N` | `{"items": [...], "total": N}` |
-| **Get page** | `atlassian confluence get <PAGE_ID>` | Direct page object |
-| **List children** | `atlassian confluence children <PAGE_ID>` | `{"items": [...]}` |
-| **Get comments** | `atlassian confluence comments <PAGE_ID>` | `{"items": [...]}` |
-| **Create page** | `atlassian confluence create <SPACE_KEY> "Title" "<html>"` | `{"id": "...", "title": "..."}` |
-| **Update page** | `atlassian confluence update <PAGE_ID> "Title" "<html>"` | `{"id": "...", "version": {...}}` |
+# Returns: {"items": [...], "total": N}
+```
+
+**Field optimization** (60-70% reduction):
+- **Default 17 fields**: `jira/fields.rs:DEFAULT_SEARCH_FIELDS`
+- Excludes: `description` (large), `id` (redundant), `renderedFields` (HTML)
+- **Priority**: CLI `--fields` > `JIRA_SEARCH_DEFAULT_FIELDS` > defaults + `JIRA_SEARCH_CUSTOM_FIELDS`
+
+**Implementation**: `jira/api.rs:search()` + `jira/fields.rs:resolve_search_fields()`
+
+**Override fields**:
+```bash
+--fields key,summary,status                    # Highest priority
+JIRA_SEARCH_DEFAULT_FIELDS=key,summary         # Replaces all defaults
+JIRA_SEARCH_CUSTOM_FIELDS=customfield_10015    # Extends defaults
+```
+
+### Create Issue
+```bash
+atlassian jira create PROJ "Bug title" Bug --description "Plain text description"
+atlassian jira create PROJ "Task" Task --description '{"type":"doc","version":1,"content":[...]}'
+
+# Returns: {"key": "PROJ-123", "id": "12345"}
+```
+
+**ADF processing**: `jira/adf.rs:process_adf_input()` - Auto-converts plain text or validates JSON ADF.
+
+**Implementation**: `jira/api.rs:create_issue()` - POST `/rest/api/3/issue`
+
+### Update Issue
+```bash
+atlassian jira update PROJ-123 '{"summary": "Updated title"}'
+atlassian jira update PROJ-123 '{"description": "New description"}'
+
+# Returns: {} (empty = success)
+```
+
+**Implementation**: `jira/api.rs:update_issue()` - PUT `/rest/api/3/issue/{key}`
+
+### Comments
+```bash
+# Add comment
+atlassian jira comment add PROJ-123 "Comment text"
+
+# Update comment (get ID from issue response)
+comment_id=$(atlassian jira get PROJ-123 | jq -r '.fields.comment.comments[0].id')
+atlassian jira comment update PROJ-123 "$comment_id" "Updated text"
+```
+
+**Implementation**:
+- `jira/api.rs:add_comment()` - POST `/rest/api/3/issue/{key}/comment`
+- `jira/api.rs:update_comment()` - PUT `/rest/api/3/issue/{key}/comment/{id}`
+
+### Transitions
+```bash
+# List available transitions
+atlassian jira transitions PROJ-123
+# Returns: [{id, name, to: {name}}, ...]
+
+# Execute transition
+trans_id=$(atlassian jira transitions PROJ-123 | jq -r '.[] | select(.name=="In Progress").id')
+atlassian jira transition PROJ-123 "$trans_id"
+# Returns: {} (empty = success)
+```
+
+**Implementation**:
+- `jira/api.rs:get_transitions()` - GET `/rest/api/3/issue/{key}/transitions`
+- `jira/api.rs:transition_issue()` - POST `/rest/api/3/issue/{key}/transitions`
+
+## Confluence Operations (6 Commands)
+
+### Search Pages (CQL)
+```bash
+atlassian confluence search "title ~ 'Meeting Notes'" --limit 20
+atlassian confluence search "space = TEAM AND created >= now()-7d"
+
+# Returns: {"items": [...], "total": N}
+```
+
+**Implementation**: `confluence/api.rs:search()` - GET `/wiki/rest/api/content/search` (v1 API)
+
+### Get Page
+```bash
+atlassian confluence get 12345
+
+# Returns: Direct page object (v2 API format)
+```
+
+**Implementation**: `confluence/api.rs:get_page()` - GET `/wiki/api/v2/pages/{id}`
+
+**Field filtering**: `confluence/fields.rs:apply_v2_filtering()`
+
+### Page Children & Comments
+```bash
+atlassian confluence children 12345
+atlassian confluence comments 12345
+
+# Returns: {"items": [...]}
+```
+
+**Implementation**:
+- `confluence/api.rs:get_page_children()` - GET `/wiki/api/v2/pages/{id}/children`
+- `confluence/api.rs:get_comments()` - GET `/wiki/api/v2/pages/{id}/footer-comments`
+
+### Create Page
+```bash
+atlassian confluence create SPACE "Page Title" "<p>HTML content with <strong>formatting</strong></p>"
+
+# Returns: {"id": "...", "title": "..."}
+```
 
 **Important**:
-- **Space key**: Use space KEY (e.g., "TEAM"), not ID. CLI auto-converts.
-- **Content format**: HTML storage format (NOT markdown): `"<p>Content with <strong>bold</strong></p>"`
-- **Version handling**: CLI auto-increments version (no manual version needed).
-- **Field includes**: `CONFLUENCE_CUSTOM_INCLUDES=ancestors,history` (valid: ancestors, children, history, operations, labels, properties)
+- Use space KEY (e.g., "TEAM"), not ID (CLI auto-converts)
+- Content format: HTML storage format (NOT Markdown)
+- Space key conversion: `confluence/api.rs:resolve_space_id()`
 
-## ADF (Atlassian Document Format)
+**Implementation**: `confluence/api.rs:create_page()` - POST `/wiki/api/v2/pages`
 
-**Plain text** (recommended): CLI auto-converts to ADF.
+### Update Page
 ```bash
-atlassian jira create PROJ "Title" Bug --description "Plain text description"
+atlassian confluence update 12345 "Updated Title" "<p>New content</p>"
+
+# Returns: {"id": "...", "version": {...}}
 ```
 
-**JSON ADF** (advanced):
+**Version handling**: CLI auto-increments version (no manual version needed).
+
+**Implementation**: `confluence/api.rs:update_page()` - PUT `/wiki/api/v2/pages/{id}`
+
+## Advanced Patterns
+
+### Bulk Operations
 ```bash
-atlassian jira create PROJ "Title" Bug --description '{
-  "type": "doc",
-  "version": 1,
-  "content": [
-    {"type": "paragraph", "content": [{"type": "text", "text": "Rich text"}]}
-  ]
-}'
+# Serial execution with error handling
+for key in $(atlassian jira search "status=Open" --limit 100 | jq -r '.items[].key'); do
+  atlassian jira comment add "$key" "Bulk comment" || echo "Failed: $key"
+done
+
+# Parallel execution (4 concurrent)
+atlassian jira search "status=Open" | jq -r '.items[].key' | \
+  xargs -P 4 -I {} atlassian jira comment add {} "Comment"
 ```
 
-## Field Optimization (Jira Search)
-
-**3-tier priority**:
-1. **CLI `--fields`**: `--fields key,summary,status` (per-request override)
-2. **JIRA_SEARCH_DEFAULT_FIELDS**: Replaces all defaults
-3. **Defaults + JIRA_SEARCH_CUSTOM_FIELDS**: Extends 17 defaults
-
-**Default 17 fields**: key, summary, status, priority, issuetype, assignee, reporter, creator, created, updated, duedate, resolutiondate, project, labels, components, parent, subtasks
-
-**Excluded**: `description` (large text field, 10s of KB)
-
-**Result**: 60-70% size reduction vs full response.
-
-## Project/Space Auto-Injection
-
-**Config**:
+### Project/Space Auto-Injection
 ```toml
+# .atlassian.toml or ~/.config/atlassian-cli/config.toml
 [default.jira]
 projects_filter = ["PROJ1", "PROJ2"]
 
@@ -96,59 +230,11 @@ spaces_filter = ["SPACE1"]
 
 **Effect**: JQL becomes `project IN (PROJ1,PROJ2) AND (your_jql)`
 
-**ORDER BY handling**: CLI places ORDER BY outside parentheses correctly.
+**ORDER BY handling**: CLI correctly places ORDER BY outside parentheses.
 
-**Skip**: If JQL/CQL already contains "project"/"space" keyword.
+**Implementation**: `jira/api.rs:search()` - JQL injection logic
 
-## Error Patterns
-
-**Common errors**:
-- `401 Unauthorized`: Check `ATLASSIAN_EMAIL` and `ATLASSIAN_API_TOKEN`
-- `403 Forbidden`: Insufficient permissions for project/space
-- `404 Not Found`: Invalid issue key or page ID
-- `400 Bad Request`: JQL/CQL syntax error or invalid field names
-- Network errors: Check domain, network connectivity
-
-**Debugging**: Use `-v` flag for verbose logs (stderr).
-
-## ID Discovery
-
-**Comment ID**: From get issue response
-```bash
-comment_id=$(atlassian jira get PROJ-123 | jq -r '.fields.comment.comments[0].id')
-atlassian jira comment update PROJ-123 "$comment_id" "Updated text"
-```
-
-**Page ID**: From search results or URL
-```bash
-page_id=$(atlassian confluence search "title=MyPage" | jq -r '.items[0].id')
-atlassian confluence get "$page_id"
-```
-
-**Transition ID**: From transitions list
-```bash
-trans_id=$(atlassian jira transitions PROJ-123 | jq -r '.[] | select(.name=="In Progress").id')
-atlassian jira transition PROJ-123 "$trans_id"
-```
-
-## Shell Patterns
-
-**Quote escaping in JQL/CQL**:
-```bash
-atlassian jira search "summary ~ \"bug fix\""
-```
-
-**JSON escaping**:
-```bash
-# Use single quotes (no variable expansion)
-atlassian jira update PROJ-123 '{"summary":"New title"}'
-
-# With variables: double quotes + escape
-title="Bug fix"
-atlassian jira update PROJ-123 "{\"summary\":\"$title\"}"
-```
-
-**Multi-line content**:
+### Multi-line Content
 ```bash
 # From file
 atlassian confluence create SPACE "Title" "$(cat page.html)"
@@ -162,129 +248,69 @@ EOF
 atlassian jira create PROJ "Title" Bug --description "$content"
 ```
 
-**jq filtering**:
+### JSON Escaping
 ```bash
-# Extract keys
-atlassian jira search "status=Open" | jq -r '.items[].key'
+# Single quotes (no variable expansion)
+atlassian jira update PROJ-123 '{"summary":"New title"}'
 
-# Filter by field
-atlassian jira search "project=PROJ" | jq -r '.items[] | select(.status.name=="Open") | .key'
+# With variables: double quotes + escape
+title="Bug fix"
+atlassian jira update PROJ-123 "{\"summary\":\"$title\"}"
 ```
 
-**Bulk operations**:
+### JQL/CQL Quote Escaping
 ```bash
-# xargs (serial)
-atlassian jira search "status=Open" | jq -r '.items[].key' | \
-  xargs -I {} atlassian jira comment add {} "Bulk comment"
-
-# for loop (with error handling)
-for key in $(atlassian jira search "..." | jq -r '.items[].key'); do
-  atlassian jira transition "$key" 31 || echo "Failed: $key"
-done
-
-# Parallel execution (4 concurrent)
-... | xargs -P 4 -I {} atlassian jira comment add {} "Comment"
+atlassian jira search "summary ~ \"bug fix\""
 ```
 
-**Exit codes**:
-```bash
-# 0 = success, non-zero = error
-set -e  # Exit on error
+## Response Structures
 
-# Conditional execution
-if result=$(atlassian jira get PROJ-123 2>/dev/null); then
-  echo "Success: $result"
-else
-  echo "Failed with exit code: $?"
-fi
-```
-
-## Response Structure (for jq parsing)
-
-**Search responses**:
+**Search responses** (standardized):
 ```json
 {
-  "items": [...],    // Array of issues/pages
-  "total": N         // Total count (NOT "size"/"totalSize")
+  "items": [...],
+  "total": N
 }
 ```
 
 **Single item** (get/create):
 ```json
 {
-  "key": "PROJ-123",  // Jira issue key
-  "id": "12345",      // Numeric ID
-  "fields": {...}     // Issue/page fields
+  "key": "PROJ-123",
+  "id": "12345",
+  "fields": {...}
 }
 ```
 
 **Empty success** (update/transition): `{}`
 
-## Pagination & Limits
+**Implementation**: Response normalization in `jira/api.rs` and `confluence/api.rs`
 
-**No pagination**: CLI uses `--limit` only (no startAt parameter).
+## Error Handling
 
-**Defaults**: Jira search: 20, Confluence search: 10
+**Common errors**:
+- `401 Unauthorized`: Check `ATLASSIAN_EMAIL` and `ATLASSIAN_API_TOKEN`
+- `403 Forbidden`: Insufficient permissions (check `config.rs:projects_filter`)
+- `404 Not Found`: Invalid issue key or page ID
+- `400 Bad Request`: JQL/CQL syntax error or invalid fields
 
-**Workaround**: Increase `--limit` (e.g., `--limit 100`) or use JQL/CQL date ranges to chunk large datasets.
+**Error handling**: `anyhow::Result` pattern used throughout codebase.
 
-## Config Quick Reference
+**Exit codes**: 0 = success, non-zero = error
 
-**TOML structure**:
-```toml
-[default]
-domain = "company.atlassian.net"
-email = "user@example.com"
-
-[default.jira]
-projects_filter = ["PROJ1"]
-search_default_fields = ["key", "summary", "status"]
-search_custom_fields = ["customfield_10015"]
-
-[default.confluence]
-spaces_filter = ["SPACE1"]
-custom_includes = ["ancestors", "history"]
-
-[work]  # Multi-tenant profile
-domain = "work.atlassian.net"
-email = "me@work.com"
-```
-
-**Key environment variables**:
-- `JIRA_SEARCH_DEFAULT_FIELDS`: Override 17 defaults
-- `JIRA_SEARCH_CUSTOM_FIELDS`: Extend defaults
-- `CONFLUENCE_CUSTOM_INCLUDES`: ancestors, children, history, operations, labels, properties
-
-## Query Patterns (CLI-specific)
-
-**ORDER BY with auto-injection**: CLI handles correctly
+**Debugging**:
 ```bash
-"status != Done ORDER BY priority DESC"
-# Becomes: "project IN (PROJ) AND (status != Done) ORDER BY priority DESC"
+# Verbose mode (stderr logs)
+atlassian -v jira search "..."
+
+# Error suppression
+atlassian jira get PROJ-123 2>/dev/null || echo "Not found"
+
+# Conditional execution
+set -e  # Exit on error
 ```
 
-**JQL/CQL functions**: `assignee = currentUser()`, `created >= -7d`, `startOfDay()` (standard, pre-trained knowledge)
-
-## Output & Debugging
-
-**Output streams**:
-- **stdout**: Compact JSON (default). Use `--pretty` for formatted output.
-- **stderr**: Logs and errors. Suppress with `2>/dev/null`.
-
-**jq pipeline**:
-```bash
-atlassian jira search "assignee=currentUser()" | jq -r '.items[].key'
-```
-
-## Performance Tuning (Optional)
-
-**Environment variables**:
-```bash
-REQUEST_TIMEOUT_MS=60000   # Increase for slow networks (default: 30000)
-MAX_CONNECTIONS=200        # Increase for bulk operations (default: 100)
-```
-
-## Config Commands (5 utilities)
+## Config Commands (5 Utilities)
 
 ```bash
 atlassian config init [--global]     # Create config file
@@ -294,12 +320,180 @@ atlassian config path [--global]     # Print config file path
 atlassian config edit [--global]     # Open config in $EDITOR
 ```
 
+**Implementation**: `main.rs:ConfigSubcommand` + `config.rs`
+
+## Output & Debugging
+
+**Output streams**:
+- **stdout**: Compact JSON (default). Use `--pretty` for formatted output.
+- **stderr**: Logs and errors. Suppress with `2>/dev/null`.
+
+**Verbose mode**: Use `-v` flag for detailed logs (stderr).
+
+**jq pipeline**:
+```bash
+atlassian jira search "assignee=currentUser()" | jq -r '.items[].key'
+```
+
+## Performance Tuning
+
+**Environment variables**:
+```bash
+REQUEST_TIMEOUT_MS=60000   # Increase for slow networks (default: 30000)
+MAX_CONNECTIONS=200        # Increase for bulk operations (default: 100)
+```
+
+**Implementation**: `http.rs:create_client()` - reqwest configuration
+
+## ADF (Atlassian Document Format)
+
+**Plain text** (recommended):
+```bash
+atlassian jira create PROJ "Title" Bug --description "Plain text"
+```
+
+**JSON ADF** (advanced):
+```bash
+atlassian jira create PROJ "Title" Bug --description '{
+  "type": "doc",
+  "version": 1,
+  "content": [
+    {"type": "paragraph", "content": [{"type": "text", "text": "Rich text"}]}
+  ]
+}'
+```
+
+**ADF processing**:
+- `jira/adf.rs:text_to_adf()` - Plain text → ADF conversion
+- `jira/adf.rs:process_adf_input()` - Auto-conversion or validation
+- `jira/adf.rs:validate_adf()` - Top-level validation only
+
+**Validation rules** (top-level):
+- `type` must be "doc"
+- `version` must be 1
+- `content` must be array
+
+**Zero-copy pattern**:
+```rust
+// Extract value without cloning (jira/api.rs)
+let description = args.get_mut("description")
+    .map(|v| std::mem::replace(v, Value::Null))
+    .unwrap_or(Value::Null);
+```
+
+## Development Patterns
+
+### Adding New Jira Command
+
+See `CLAUDE.md` for detailed instructions. Summary:
+
+1. **main.rs**: Add to `JiraSubcommand` enum
+2. **main.rs**: Add handler
+3. **jira/api.rs**: Implement function
+4. **Test**: Add test in `jira/api.rs`
+
+### Modifying Field Filtering
+
+1. **jira/fields.rs**: Update `DEFAULT_SEARCH_FIELDS`
+2. **Test impact**: Check test fixtures
+3. **Update docs**: README.md field count
+
+### Testing
+
+```bash
+cargo test                  # All tests
+cargo test jira::adf       # Module tests
+cargo test -- --nocapture  # With output
+```
+
+**Test utilities**: `src/test_utils.rs` - Shared test helpers
+
+## Practical Examples
+
+### Daily Standup Report
+```bash
+# Get my issues updated today
+atlassian jira search "assignee = currentUser() AND updated >= startOfDay()" \
+  --fields key,summary,status | jq -r '.items[] | "\(.key): \(.fields.summary)"'
+```
+
+### Sprint Planning
+```bash
+# Create stories for new feature
+atlassian jira create PROJ "User authentication" Story --description "Implement OAuth2"
+atlassian jira create PROJ "API integration" Story --description "Connect to external API"
+```
+
+### Documentation Workflow
+```bash
+# Create meeting notes
+atlassian confluence create TEAM "Meeting Notes $(date +%Y-%m-%d)" \
+  "<h1>Attendees</h1><ul><li>Person 1</li></ul>"
+
+# Update existing page
+page_id=$(atlassian confluence search "title=ProjectSpec" | jq -r '.items[0].id')
+atlassian confluence update "$page_id" "Project Spec v2" "$(cat spec.html)"
+```
+
+### Bulk Transition
+```bash
+# Move all open bugs to "In Progress"
+trans_id=$(atlassian jira transitions PROJ-1 | jq -r '.[] | select(.name=="In Progress").id')
+
+atlassian jira search "project=PROJ AND status=Open AND issuetype=Bug" | \
+  jq -r '.items[].key' | \
+  xargs -I {} atlassian jira transition {} "$trans_id"
+```
+
+## Architecture Quick Reference
+
+**Data flow**:
+```
+Terminal → clap::Parser → CLI Command (main.rs)
+  ↓
+Load Config (config.rs) - 4-tier priority
+  ↓
+API Operation (jira/api.rs or confluence/api.rs)
+  ↓
+Field filtering (jira/fields.rs or confluence/fields.rs)
+  ↓
+HTTP Request (http.rs) - reqwest + rustls
+  ↓
+JSON Response → stdout
+```
+
+**Key patterns**:
+- **No response filtering**: `filter.rs` is dead code
+- **Field optimization**: 17 defaults for Jira search (60-70% reduction)
+- **ADF auto-conversion**: Plain text → JSON ADF
+- **Config caching**: `base_url` computed once
+
+## Dependencies
+
+| Crate | Purpose | Location |
+|-------|---------|----------|
+| clap | CLI parsing (derive API) | `main.rs` |
+| tokio | Async runtime | Throughout |
+| reqwest | HTTP client (rustls) | `http.rs` |
+| serde_json | JSON serialization | Throughout |
+| anyhow | Error handling | Throughout |
+| toml | Config file parsing | `config.rs` |
+| dirs | Platform-specific paths | `config.rs` |
+
+## Resources
+
+- [CLAUDE.md](../../CLAUDE.md) - Developer guide (architecture, patterns)
+- [README.md](../../README.md) - User documentation
+- [Jira REST API v3](https://developer.atlassian.com/cloud/jira/platform/rest/v3/)
+- [Confluence REST API v2](https://developer.atlassian.com/cloud/confluence/rest/v2/)
+- [ADF Specification](https://developer.atlassian.com/cloud/jira/platform/apis/document/structure/)
+
 ## Testing This Skill
 
-**Activation test**: Ask "Show me Jira issues assigned to me"
+**Activation test**: "Show me my Jira issues"
 
-**Expected**: Claude uses `atlassian jira search "assignee = currentUser()"`
+**Expected**: Uses `atlassian jira search "assignee = currentUser()"`
 
-**Verification**: Ask "Create a Confluence page about X"
+**Codebase integration**: "Where is field optimization implemented?"
 
-**Expected**: Claude uses `atlassian confluence create <space> "<title>" "<html content>"`
+**Expected**: References `jira/fields.rs:DEFAULT_SEARCH_FIELDS`
