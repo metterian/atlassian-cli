@@ -14,9 +14,7 @@
 
 ```bash
 # 1. Install
-git clone https://github.com/yourusername/atlassian-cli
-cd atlassian-cli
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/junyeong-ai/atlassian-cli/main/scripts/install.sh | bash
 
 # 2. Configure
 atlassian config init --global
@@ -56,35 +54,35 @@ atlassian confluence search "type=page AND space=TEAM"
 
 ## 📦 Installation
 
-### Method 1: Install Script (Recommended)
+### Method 1: Prebuilt Binary (Recommended)
 
 ```bash
-git clone https://github.com/yourusername/atlassian-cli
-cd atlassian-cli
-cargo build --release
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/junyeong-ai/atlassian-cli/main/scripts/install.sh | bash
 ```
+
+**Features**:
+- Downloads platform-specific binary from GitHub Releases
+- Automatic SHA256 checksum verification
+- Optional Claude Code skill installation
+- Fallback to source build if download fails
+
+**Supported Platforms**:
+- Linux: x86_64, aarch64
+- macOS: Intel (x86_64), Apple Silicon (aarch64)
+- Windows: x86_64
 
 Binary will be installed to `~/.local/bin/atlassian`.
 
-### Method 2: Cargo
+### Method 2: Build from Source
 
 ```bash
-cargo install --path .
-```
-
-### Method 3: Manual Build
-
-```bash
+git clone https://github.com/junyeong-ai/atlassian-cli
+cd atlassian-cli
 cargo build --release
-# Binary: target/release/atlassian
+cp target/release/atlassian ~/.local/bin/
 ```
 
-### Uninstall
-
-```bash
-./uninstall.sh
-```
+**Requirements**: Rust 1.91.1+ (2024 edition)
 
 ---
 

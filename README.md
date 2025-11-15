@@ -14,9 +14,7 @@
 
 ```bash
 # 1. 설치
-git clone https://github.com/yourusername/atlassian-cli
-cd atlassian-cli
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/junyeong-ai/atlassian-cli/main/scripts/install.sh | bash
 
 # 2. 설정
 atlassian config init --global
@@ -56,35 +54,35 @@ atlassian confluence search "type=page AND space=TEAM"
 
 ## 📦 설치
 
-### 방법 1: 설치 스크립트 (권장)
+### 방법 1: 사전 빌드 바이너리 (권장)
 
 ```bash
-git clone https://github.com/yourusername/atlassian-cli
-cd atlassian-cli
-cargo build --release
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/junyeong-ai/atlassian-cli/main/scripts/install.sh | bash
 ```
+
+**특징**:
+- GitHub Releases에서 플랫폼별 바이너리 다운로드
+- SHA256 체크섬 자동 검증
+- Claude Code 스킬 자동 설치 (선택적)
+- 다운로드 실패 시 소스 빌드로 폴백
+
+**지원 플랫폼**:
+- Linux: x86_64, aarch64
+- macOS: Intel (x86_64), Apple Silicon (aarch64)
+- Windows: x86_64
 
 바이너리가 `~/.local/bin/atlassian`에 설치됩니다.
 
-### 방법 2: Cargo
+### 방법 2: 소스에서 빌드
 
 ```bash
-cargo install --path .
-```
-
-### 방법 3: 수동 빌드
-
-```bash
+git clone https://github.com/junyeong-ai/atlassian-cli
+cd atlassian-cli
 cargo build --release
-# 바이너리: target/release/atlassian
+cp target/release/atlassian ~/.local/bin/
 ```
 
-### 제거
-
-```bash
-./uninstall.sh
-```
+**요구사항**: Rust 1.91.1+ (2024 edition)
 
 ---
 
