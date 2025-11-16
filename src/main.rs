@@ -206,7 +206,8 @@ async fn handle_config(cmd: ConfigCommand) -> Result<()> {
             Ok(())
         }
         ConfigSubcommand::Show => {
-            let config = atlassian_cli::Config::load_without_validation(None, None, None, None, None)?;
+            let config =
+                atlassian_cli::Config::load_without_validation(None, None, None, None, None)?;
 
             // Display credentials (not in Config struct's TOML serialization)
             println!("[default]");
@@ -280,7 +281,7 @@ async fn handle_config(cmd: ConfigCommand) -> Result<()> {
             } else {
                 // Try project config first, fall back to global
                 atlassian_cli::Config::project_config_path()
-                    .or_else(|| atlassian_cli::Config::global_config_path())
+                    .or_else(atlassian_cli::Config::global_config_path)
             };
 
             if let Some(p) = path {
@@ -296,7 +297,7 @@ async fn handle_config(cmd: ConfigCommand) -> Result<()> {
             } else {
                 // Try project config first, fall back to global
                 atlassian_cli::Config::project_config_path()
-                    .or_else(|| atlassian_cli::Config::global_config_path())
+                    .or_else(atlassian_cli::Config::global_config_path)
             };
 
             let path = path.ok_or_else(|| anyhow::anyhow!("Config file not found"))?;
