@@ -172,9 +172,9 @@ async fn main() -> Result<()> {
             let config = atlassian_cli::Config::load(
                 cli.config.as_ref(),
                 cli.profile.as_ref(),
-                cli.domain.as_ref(),
-                cli.email.as_ref(),
-                cli.token.as_ref(),
+                cli.domain,
+                cli.email,
+                cli.token,
             )?;
 
             let result = handle_jira(cmd, &config).await?;
@@ -185,9 +185,9 @@ async fn main() -> Result<()> {
             let config = atlassian_cli::Config::load(
                 cli.config.as_ref(),
                 cli.profile.as_ref(),
-                cli.domain.as_ref(),
-                cli.email.as_ref(),
-                cli.token.as_ref(),
+                cli.domain,
+                cli.email,
+                cli.token,
             )?;
 
             let result = handle_confluence(cmd, &config).await?;
@@ -230,8 +230,7 @@ async fn handle_config(cmd: ConfigCommand) -> Result<()> {
             println!();
 
             // Display rest of config via TOML serialization
-            let display = config.clone();
-            let toml_str = toml::to_string_pretty(&display)?;
+            let toml_str = toml::to_string_pretty(&config)?;
             // Skip the empty [default] section if present
             for line in toml_str.lines() {
                 if line.trim().is_empty() || line.trim() == "[default]" {

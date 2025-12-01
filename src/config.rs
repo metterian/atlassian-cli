@@ -101,9 +101,9 @@ impl Config {
     pub fn load(
         config_path: Option<&PathBuf>,
         profile: Option<&String>,
-        domain: Option<&String>,
-        email: Option<&String>,
-        token: Option<&String>,
+        domain: Option<String>,
+        email: Option<String>,
+        token: Option<String>,
     ) -> Result<Self> {
         Self::load_with_validation(config_path, profile, domain, email, token, true)
     }
@@ -111,9 +111,9 @@ impl Config {
     pub fn load_without_validation(
         config_path: Option<&PathBuf>,
         profile: Option<&String>,
-        domain: Option<&String>,
-        email: Option<&String>,
-        token: Option<&String>,
+        domain: Option<String>,
+        email: Option<String>,
+        token: Option<String>,
     ) -> Result<Self> {
         Self::load_with_validation(config_path, profile, domain, email, token, false)
     }
@@ -121,9 +121,9 @@ impl Config {
     fn load_with_validation(
         config_path: Option<&PathBuf>,
         profile: Option<&String>,
-        domain: Option<&String>,
-        email: Option<&String>,
-        token: Option<&String>,
+        domain: Option<String>,
+        email: Option<String>,
+        token: Option<String>,
         validate: bool,
     ) -> Result<Self> {
         let mut config = Self::default();
@@ -211,14 +211,14 @@ impl Config {
         }
 
         // 5. CLI flags override (highest priority)
-        if let Some(val) = domain {
-            config.domain = Some(val.clone());
+        if domain.is_some() {
+            config.domain = domain;
         }
-        if let Some(val) = email {
-            config.email = Some(val.clone());
+        if email.is_some() {
+            config.email = email;
         }
-        if let Some(val) = token {
-            config.token = Some(val.clone());
+        if token.is_some() {
+            config.token = token;
         }
 
         // 6. Validate and normalize

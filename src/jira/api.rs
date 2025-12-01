@@ -323,8 +323,8 @@ pub async fn get_transitions(issue_key: &str, config: &Config) -> Result<Value> 
         anyhow::bail!("Failed to get transitions: {}", response.status());
     }
 
-    let data: Value = response.json().await?;
-    Ok(data["transitions"].clone())
+    let mut data: Value = response.json().await?;
+    Ok(data["transitions"].take())
 }
 
 #[cfg(test)]
