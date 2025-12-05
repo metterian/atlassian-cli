@@ -14,6 +14,7 @@
 > - 🚀 **Single binary** (no runtime required)
 > - 🎯 **60-70% response optimization** (field filtering)
 > - 📄 **Full pagination** (fetch all results with `--all`)
+> - 📝 **Markdown conversion** (`--format markdown` for HTML→Markdown)
 > - 🔧 **4-tier config** (CLI → ENV → Project → Global)
 
 ---
@@ -46,9 +47,11 @@ atlassian-cli confluence search "type=page" --limit 10
 # Search issues (JQL)
 atlassian-cli jira search "project = PROJ AND status = Open" --limit 10
 atlassian-cli jira search "assignee = currentUser()" --fields key,summary,status
+atlassian-cli jira search "status = Open" --format markdown  # ADF → Markdown
 
 # Get/Create/Update issues
 atlassian-cli jira get PROJ-123
+atlassian-cli jira get PROJ-123 --format markdown  # description as Markdown
 atlassian-cli jira create PROJ "Bug fix" Bug --description "Details"
 atlassian-cli jira update PROJ-123 '{"summary":"New title"}'
 
@@ -64,10 +67,14 @@ atlassian-cli jira transition PROJ-123 31
 atlassian-cli confluence search "type=page AND space=TEAM" --limit 10
 atlassian-cli confluence search "type=page" --all           # Fetch all results
 atlassian-cli confluence search "type=page" --all --stream  # JSONL streaming
-atlassian-cli confluence search "type=page" --expand body.storage,ancestors
+atlassian-cli confluence search "type=page" --expand body.storage --format markdown  # Markdown conversion
+
+# Get page (Markdown conversion)
+atlassian-cli confluence get 123456 --format markdown
 
 # Get/Create/Update pages
-atlassian-cli confluence get 123456
+atlassian-cli confluence get 123456                          # HTML format (default)
+atlassian-cli confluence get 123456 --format markdown        # Markdown conversion
 atlassian-cli confluence create TEAM "API Docs" "<p>Content</p>"
 atlassian-cli confluence update 123456 "New Title" "<p>New content</p>"
 
@@ -247,7 +254,9 @@ Executed: project IN (PROJ1,PROJ2) AND (status = Open)
 | Command | Description | Example |
 |---------|-------------|---------|
 | `get <KEY>` | Get issue | `jira get PROJ-123` |
+| `get <KEY> --format markdown` | Get issue (Markdown) | `jira get PROJ-123 --format markdown` |
 | `search <JQL>` | JQL search | `jira search "status = Open" --limit 10` |
+| `search <JQL> --format markdown` | JQL search (Markdown) | `jira search "status = Open" --format markdown` |
 | `create <PROJECT> <SUMMARY> <TYPE>` | Create issue | `jira create PROJ "Title" Bug` |
 | `update <KEY> <JSON>` | Update issue | `jira update PROJ-123 '{"summary":"New"}'` |
 | `comment add <KEY> <TEXT>` | Add comment | `jira comment add PROJ-123 "Done"` |
@@ -259,7 +268,9 @@ Executed: project IN (PROJ1,PROJ2) AND (status = Open)
 | Command | Description | Example |
 |---------|-------------|---------|
 | `search <CQL>` | CQL search | `confluence search "type=page" --limit 10` |
+| `search <CQL> --format markdown` | CQL search (Markdown) | `confluence search "type=page" --format markdown` |
 | `get <ID>` | Get page | `confluence get 123456` |
+| `get <ID> --format markdown` | Get page (Markdown) | `confluence get 123456 --format markdown` |
 | `create <SPACE> <TITLE> <CONTENT>` | Create page | `confluence create TEAM "Title" "<p>HTML</p>"` |
 | `update <ID> <TITLE> <CONTENT>` | Update page | `confluence update 123456 "Title" "<p>HTML</p>"` |
 | `children <ID>` | List children | `confluence children 123456` |
@@ -286,6 +297,7 @@ Executed: project IN (PROJ1,PROJ2) AND (status = Open)
 | `--all` | All results (pagination) | confluence search |
 | `--stream` | JSONL streaming | confluence search (requires --all) |
 | `--expand` | Expand fields (body.storage, ancestors, etc.) | confluence search |
+| `--format` | Output format (html, markdown) | confluence search, confluence get |
 | `--fields` | Specify fields | jira search, jira get |
 
 ---

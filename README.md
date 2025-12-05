@@ -14,6 +14,7 @@
 > - 🚀 **단일 바이너리** (런타임 불필요)
 > - 🎯 **60-70% 응답 최적화** (필드 필터링)
 > - 📄 **전체 페이지네이션** (`--all`로 모든 결과 조회)
+> - 📝 **Markdown 변환** (`--format markdown`으로 HTML→Markdown)
 > - 🔧 **4단계 설정** (CLI → ENV → Project → Global)
 
 ---
@@ -46,9 +47,11 @@ atlassian-cli confluence search "type=page" --limit 10
 # 이슈 검색 (JQL)
 atlassian-cli jira search "project = PROJ AND status = Open" --limit 10
 atlassian-cli jira search "assignee = currentUser()" --fields key,summary,status
+atlassian-cli jira search "status = Open" --format markdown  # ADF → Markdown 변환
 
 # 이슈 조회/생성/수정
 atlassian-cli jira get PROJ-123
+atlassian-cli jira get PROJ-123 --format markdown  # description을 Markdown으로
 atlassian-cli jira create PROJ "버그 수정" Bug --description "상세 내용"
 atlassian-cli jira update PROJ-123 '{"summary":"새 제목"}'
 
@@ -64,10 +67,14 @@ atlassian-cli jira transition PROJ-123 31
 atlassian-cli confluence search "type=page AND space=TEAM" --limit 10
 atlassian-cli confluence search "type=page" --all           # 전체 결과 조회
 atlassian-cli confluence search "type=page" --all --stream  # JSONL 스트리밍
-atlassian-cli confluence search "type=page" --expand body.storage,ancestors
+atlassian-cli confluence search "type=page" --expand body.storage --format markdown  # Markdown 변환
+
+# 페이지 조회 (Markdown 변환)
+atlassian-cli confluence get 123456 --format markdown
 
 # 페이지 조회/생성/수정
-atlassian-cli confluence get 123456
+atlassian-cli confluence get 123456                          # HTML 형식 (기본)
+atlassian-cli confluence get 123456 --format markdown        # Markdown 변환
 atlassian-cli confluence create TEAM "API 문서" "<p>내용</p>"
 atlassian-cli confluence update 123456 "새 제목" "<p>새 내용</p>"
 
@@ -247,7 +254,9 @@ JIRA_SEARCH_DEFAULT_FIELDS="key,summary" atlassian-cli jira search "project = PR
 | 명령어 | 설명 | 예제 |
 |--------|------|------|
 | `get <KEY>` | 이슈 조회 | `jira get PROJ-123` |
+| `get <KEY> --format markdown` | 이슈 조회 (Markdown) | `jira get PROJ-123 --format markdown` |
 | `search <JQL>` | JQL 검색 | `jira search "status = Open" --limit 10` |
+| `search <JQL> --format markdown` | JQL 검색 (Markdown) | `jira search "status = Open" --format markdown` |
 | `create <PROJECT> <SUMMARY> <TYPE>` | 이슈 생성 | `jira create PROJ "Title" Bug` |
 | `update <KEY> <JSON>` | 이슈 수정 | `jira update PROJ-123 '{"summary":"New"}'` |
 | `comment add <KEY> <TEXT>` | 댓글 추가 | `jira comment add PROJ-123 "Done"` |
@@ -259,7 +268,9 @@ JIRA_SEARCH_DEFAULT_FIELDS="key,summary" atlassian-cli jira search "project = PR
 | 명령어 | 설명 | 예제 |
 |--------|------|------|
 | `search <CQL>` | CQL 검색 | `confluence search "type=page" --limit 10` |
+| `search <CQL> --format markdown` | CQL 검색 (Markdown) | `confluence search "type=page" --format markdown` |
 | `get <ID>` | 페이지 조회 | `confluence get 123456` |
+| `get <ID> --format markdown` | 페이지 조회 (Markdown) | `confluence get 123456 --format markdown` |
 | `create <SPACE> <TITLE> <CONTENT>` | 페이지 생성 | `confluence create TEAM "Title" "<p>HTML</p>"` |
 | `update <ID> <TITLE> <CONTENT>` | 페이지 수정 | `confluence update 123456 "Title" "<p>HTML</p>"` |
 | `children <ID>` | 하위 페이지 | `confluence children 123456` |
@@ -286,6 +297,7 @@ JIRA_SEARCH_DEFAULT_FIELDS="key,summary" atlassian-cli jira search "project = PR
 | `--all` | 전체 결과 (페이지네이션) | confluence search |
 | `--stream` | JSONL 스트리밍 | confluence search (--all 필요) |
 | `--expand` | 확장 필드 (body.storage, ancestors 등) | confluence search |
+| `--format` | 출력 형식 (html, markdown) | confluence search, confluence get |
 | `--fields` | 필드 지정 | jira search, jira get |
 
 ---

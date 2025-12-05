@@ -14,7 +14,8 @@ src/
 │   └── adf.rs       # Atlassian Document Format conversion
 └── confluence/
     ├── api.rs       # Confluence REST API v1/v2, pagination
-    └── fields.rs    # v2 include params, v1 expand params
+    ├── fields.rs    # v2 include params, v1 expand params
+    └── markdown.rs  # HTML→Markdown conversion (htmd)
 ```
 
 ## Key Patterns
@@ -38,15 +39,22 @@ const DEFAULT_SEARCH_FIELDS: &[&str] = &[
 ];
 ```
 
-### ADF Auto-Conversion
+### ADF Conversion
 ```rust
-// jira/adf.rs - plain text → ADF JSON
+// jira/adf.rs - bidirectional ADF ↔ Markdown/Text conversion
+// Input: plain text → ADF JSON (for create/update)
 pub fn process_adf_input(value: Value) -> Result<Value> {
     match value {
         Value::String(text) => Ok(text_to_adf(&text)),
         Value::Object(_) => { validate_adf(&value)?; Ok(value) }
         _ => bail!("must be string or ADF")
     }
+}
+
+// Output: ADF → Markdown (for reading)
+pub fn adf_to_markdown(adf: &Value) -> String {
+    // Handles: paragraph, heading, bulletList, orderedList,
+    // codeBlock, panel, table, mentions, links, marks
 }
 ```
 
@@ -62,6 +70,19 @@ loop {
         None => break,
     }
     sleep(Duration::from_millis(200)).await; // rate limit
+}
+```
+
+### HTML→Markdown Conversion
+```rust
+// confluence/markdown.rs - Confluence HTML to Markdown
+pub fn convert_to_markdown(html: &str) -> String {
+    let converter = HtmlToMarkdown::builder()
+        .skip_tags(vec!["script", "style"])
+        .build();
+    // Handles ac:*, ri:* tags, images, macros
+    let cleaned = clean_confluence_html(html);
+    converter.convert(&cleaned)...
 }
 ```
 
@@ -99,14 +120,23 @@ fn apply_space_filter(cql: &str, config: &Config) -> String {
 - Confluence Search: `/wiki/rest/api/search` (v1, uses `expand` param)
 - Confluence Pages: `/wiki/api/v2/pages/*` (v2, uses `include-*` params)
 
-## CLI Options (Confluence Search)
+## CLI Options (Jira)
 
-| Option | Description |
-|--------|-------------|
-| `--limit N` | Max results per request (default: 10, max: 250) |
-| `--all` | Fetch all results via cursor pagination |
-| `--stream` | Output JSONL (requires --all) |
-| `--expand` | Expand fields: `body.storage`, `ancestors`, `version`, etc. |
+| Option | Description | Applies To |
+|--------|-------------|------------|
+| `--format` | Output format: `html` (default, raw ADF) or `markdown` | get, search |
+| `--fields` | Specify fields to return | search |
+| `--limit N` | Max results (default: 20) | search |
+
+## CLI Options (Confluence)
+
+| Option | Description | Applies To |
+|--------|-------------|------------|
+| `--limit N` | Max results per request (default: 10, max: 250) | search |
+| `--all` | Fetch all results via cursor pagination | search |
+| `--stream` | Output JSONL (requires --all) | search |
+| `--expand` | Expand fields: `body.storage`, `ancestors`, `version`, etc. | search |
+| `--format` | Output format: `html` (default) or `markdown` | search, get |
 
 ## Testing
 

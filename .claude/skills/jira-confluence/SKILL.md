@@ -1,116 +1,102 @@
 ---
 name: jira-confluence
-description: Execute Jira/Confluence queries via atlassian CLI. Search issues with JQL, manage pages with CQL, create/update tickets, handle comments and transitions, work with ADF format. Supports full pagination with --all flag. Use when working with Jira tickets, Confluence pages, sprint planning, issue tracking, or Atlassian workspace queries.
+description: Execute Jira/Confluence queries via atlassian-cli. Search issues with JQL, manage pages with CQL, create/update tickets, handle comments and transitions, work with ADF format. Use when working with Jira tickets, Confluence pages, sprint planning, issue tracking, or Atlassian workspace queries.
 allowed-tools: Bash
 ---
 
-# atlassian-cli: Jira & Confluence CLI
+# atlassian-cli
 
-## Quick Start
+## Jira
 
+**Reading**: `--format markdown` converts ADF to Markdown (recommended)
+**Writing**: Plain text auto-converts to ADF. For rich text, use ADF JSON.
+
+### Commands
 ```bash
-atlassian-cli --version
-atlassian-cli config show
-```
+# Get issue
+atlassian-cli jira get PROJ-123 --format markdown
 
-## Authentication (4-Tier Priority)
+# Search (JQL)
+atlassian-cli jira search "assignee = currentUser()" --format markdown --limit 20
+atlassian-cli jira search "project = PROJ" --fields key,summary,status --limit 50
 
-1. **CLI flags**: `--domain company.atlassian.net --email user@example.com --token TOKEN`
-2. **Environment**: `ATLASSIAN_DOMAIN`, `ATLASSIAN_EMAIL`, `ATLASSIAN_API_TOKEN`
-3. **Project config**: `./.atlassian.toml`
-4. **Global config**: `~/.config/atlassian-cli/config.toml`
+# Create/Update
+atlassian-cli jira create PROJ "Summary" Bug --description "Plain text"
+atlassian-cli jira update PROJ-123 '{"summary": "New title", "description": "Plain text"}'
 
-Domain format: `company.atlassian.net` (NOT `https://company.atlassian.net`)
-
-## Jira Operations
-
-### Search Issues (JQL)
-```bash
-atlassian-cli jira search "assignee = currentUser() AND status != Done" --limit 50
-atlassian-cli jira search "project = PROJ ORDER BY priority DESC" --fields key,summary,status
-```
-
-**Field optimization** (60-70% reduction):
-- Default 17 fields exclude `description`, `id`, `renderedFields`
-- Override: `--fields key,summary,status`
-- Env: `JIRA_SEARCH_DEFAULT_FIELDS`, `JIRA_SEARCH_CUSTOM_FIELDS`
-
-### Get/Create/Update Issue
-```bash
-atlassian-cli jira get PROJ-123
-atlassian-cli jira create PROJ "Bug title" Bug --description "Plain text"
-atlassian-cli jira update PROJ-123 '{"summary": "Updated title"}'
-```
-
-### Comments & Transitions
-```bash
+# Comments & Transitions
 atlassian-cli jira comment add PROJ-123 "Comment text"
 atlassian-cli jira transitions PROJ-123
 atlassian-cli jira transition PROJ-123 31
 ```
 
-## Confluence Operations
+### ADF Format (for rich text)
 
-### Search Pages (CQL)
+Root: `{"version": 1, "type": "doc", "content": [...]}`
+
+| Node | Example |
+|------|---------|
+| paragraph | `{"type": "paragraph", "content": [{"type": "text", "text": "..."}]}` |
+| heading | `{"type": "heading", "attrs": {"level": 2}, "content": [...]}` |
+| bulletList | `{"type": "bulletList", "content": [{"type": "listItem", "content": [...]}]}` |
+| codeBlock | `{"type": "codeBlock", "attrs": {"language": "python"}, "content": [...]}` |
+
+Marks: `{"type": "text", "text": "bold", "marks": [{"type": "strong"}]}`
+- `strong`, `em`, `code`, `strike`, `link` (with `attrs.href`)
+
+List hierarchy: `bulletList` → `listItem` → `paragraph` → `text`
+
+## Confluence
+
+**Reading**: `--format markdown` converts HTML to Markdown (recommended)
+**Writing**: HTML storage format required (e.g., `<p>text</p>`)
+
+### Commands
 ```bash
-# Basic search
-atlassian-cli confluence search "title ~ 'Meeting Notes'" --limit 20
+# Get page
+atlassian-cli confluence get 12345 --format markdown
 
-# Full pagination (all results)
-atlassian-cli confluence search "space = TEAM" --all
+# Search (CQL) - metadata only (fast)
+atlassian-cli confluence search "space = TEAM" --limit 20
 
-# JSONL streaming (memory efficient for large results)
-atlassian-cli confluence search "space = TEAM" --all --stream
+# Search with content (requires --expand)
+atlassian-cli confluence search "title ~ 'API'" --expand body.storage --format markdown --limit 10
 
-# With expanded fields
-atlassian-cli confluence search "type=page" --expand body.storage,ancestors
-```
+# Pagination
+atlassian-cli confluence search "space = TEAM" --all --format markdown
+atlassian-cli confluence search "space = TEAM" --all --stream > pages.jsonl
 
-**Pagination options**:
-- `--limit N`: Max results per request (default: 10, max: 250)
-- `--all`: Fetch all results via cursor-based pagination
-- `--stream`: Output JSONL format (requires --all)
-- `--expand`: Expand fields (body.storage, ancestors, version, etc.)
+# Create/Update (HTML format)
+atlassian-cli confluence create SPACE "Title" "<p>Content</p>"
+atlassian-cli confluence update 12345 "Title" "<p>Updated</p>"
 
-### Get/Create/Update Page
-```bash
-atlassian-cli confluence get 12345
-atlassian-cli confluence create SPACE "Page Title" "<p>HTML content</p>"
-atlassian-cli confluence update 12345 "Updated Title" "<p>New content</p>"
-```
-
-Use space KEY (e.g., "TEAM"), not ID. Content: HTML storage format (NOT Markdown).
-
-### Children & Comments
-```bash
+# Children & Comments
 atlassian-cli confluence children 12345
 atlassian-cli confluence comments 12345
 ```
 
-## Config Commands
+### Options
+| Option | Description |
+|--------|-------------|
+| `--expand body.storage` | Include page content (required for `--format markdown`) |
+| `--format markdown` | Convert to Markdown |
+| `--limit N` | Max results (default: 10, max: 250) |
+| `--all` | Fetch all pages via cursor pagination |
+| `--stream` | Output JSONL (requires --all) |
+
+## Authentication
+
+Priority: CLI flags > Environment > Project config > Global config
 
 ```bash
-atlassian-cli config init [--global]
-atlassian-cli config show
-atlassian-cli config path [--global]
-atlassian-cli config edit [--global]
+# Environment variables
+export ATLASSIAN_DOMAIN=company.atlassian.net
+export ATLASSIAN_EMAIL=user@example.com
+export ATLASSIAN_API_TOKEN=token
 ```
 
-## Advanced Patterns
+## Auto-Injection Filter
 
-### Bulk Operations
-```bash
-# Serial with error handling
-for key in $(atlassian-cli jira search "status=Open" | jq -r '.items[].key'); do
-  atlassian-cli jira comment add "$key" "Comment" || echo "Failed: $key"
-done
-
-# Parallel (4 concurrent)
-atlassian-cli jira search "status=Open" | jq -r '.items[].key' | \
-  xargs -P 4 -I {} atlassian-cli jira comment add {} "Comment"
-```
-
-### Project/Space Auto-Injection
 ```toml
 # .atlassian.toml
 [default.jira]
@@ -121,27 +107,3 @@ spaces_filter = ["SPACE1"]
 ```
 
 Effect: JQL becomes `project IN (PROJ1,PROJ2) AND (your_jql)`
-
-### Multi-line Content
-```bash
-atlassian-cli confluence create SPACE "Title" "$(cat page.html)"
-atlassian-cli jira create PROJ "Title" Bug --description "$(cat <<'EOF'
-Line 1
-Line 2
-EOF
-)"
-```
-
-## Common Workflows
-
-```bash
-# Daily standup: my issues updated today
-atlassian-cli jira search "assignee = currentUser() AND updated >= startOfDay()" \
-  --fields key,summary,status | jq -r '.items[] | "\(.key): \(.fields.summary)"'
-
-# Export all Confluence pages in a space
-atlassian-cli confluence search "space=TEAM AND type=page" --all --stream > pages.jsonl
-
-# Meeting notes with date
-atlassian-cli confluence create TEAM "Notes $(date +%Y-%m-%d)" "<h1>Attendees</h1><ul><li>Person 1</li></ul>"
-```
