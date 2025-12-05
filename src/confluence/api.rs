@@ -34,11 +34,12 @@ fn apply_space_filter(cql: &str, config: &Config) -> String {
     }
 }
 
-fn build_next_url(base_url: &str, next_path: &str) -> String {
+fn build_next_url(links_base: &str, next_path: &str) -> String {
     if next_path.starts_with("http") {
         next_path.to_string()
     } else {
-        format!("{}{}", base_url.trim_end_matches("/wiki"), next_path)
+        // links_base from API response already includes /wiki
+        format!("{}{}", links_base, next_path)
     }
 }
 
@@ -140,7 +141,9 @@ pub async fn search_all(
             break;
         }
 
-        next_url = Some(build_next_url(base_url, next_path.unwrap()));
+        // Use _links.base from API response (includes /wiki), not config.base_url()
+        let links_base = data["_links"]["base"].as_str().unwrap_or(base_url);
+        next_url = Some(build_next_url(links_base, next_path.unwrap()));
         page_num += 1;
         sleep(Duration::from_millis(RATE_LIMIT_DELAY_MS)).await;
     }
@@ -469,9 +472,10 @@ mod tests {
 
     #[test]
     fn test_build_next_url_relative_path() {
-        let base_url = "https://test.atlassian.net/wiki";
-        let next_path = "/wiki/rest/api/search?cql=type%3Dpage&cursor=abc123";
-        let result = build_next_url(base_url, next_path);
+        // _links.base from API includes /wiki, _links.next does NOT include /wiki
+        let links_base = "https://test.atlassian.net/wiki";
+        let next_path = "/rest/api/search?cql=type%3Dpage&cursor=abc123";
+        let result = build_next_url(links_base, next_path);
         assert_eq!(
             result,
             "https://test.atlassian.net/wiki/rest/api/search?cql=type%3Dpage&cursor=abc123"

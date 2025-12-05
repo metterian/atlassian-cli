@@ -108,6 +108,8 @@ enum ConfluenceSubcommand {
         all: bool,
         #[arg(long, help = "Stream results as JSONL (requires --all)")]
         stream: bool,
+        #[arg(long, value_delimiter = ',', help = "Fields to expand (e.g., body.storage,ancestors)")]
+        expand: Option<Vec<String>>,
     },
     Get {
         page_id: String,
@@ -401,11 +403,12 @@ async fn handle_confluence(
             limit,
             all,
             stream,
+            expand,
         } => {
             if all {
-                confluence::search_all(&query, None, None, stream, config).await
+                confluence::search_all(&query, None, expand, stream, config).await
             } else {
-                confluence::search(&query, limit, None, None, config).await
+                confluence::search(&query, limit, None, expand, config).await
             }
         }
         ConfluenceSubcommand::Get { page_id } => {

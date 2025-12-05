@@ -1,86 +1,152 @@
 # Atlassian CLI
 
 [![CI](https://github.com/junyeong-ai/atlassian-cli/workflows/CI/badge.svg)](https://github.com/junyeong-ai/atlassian-cli/actions)
-[![Rust](https://img.shields.io/badge/rust-1.91.1%2B-orange?style=flat-square&logo=rust)](https://www.rust-lang.org)
+[![Lint](https://github.com/junyeong-ai/atlassian-cli/workflows/Lint/badge.svg)](https://github.com/junyeong-ai/atlassian-cli/actions)
+[![Rust](https://img.shields.io/badge/rust-1.91.1%2B%20(2024%20edition)-orange?style=flat-square&logo=rust)](https://www.rust-lang.org)
+[![Version](https://img.shields.io/badge/version-0.1.0-blue?style=flat-square)](https://github.com/junyeong-ai/atlassian-cli/releases)
 
-**[English](README.en.md)** | 한국어
+> **🌐 한국어** | **[English](README.en.md)**
 
-Jira와 Confluence를 터미널에서 빠르게 사용하세요.
+---
 
-## 특징
+> **⚡ 빠르고 강력한 Atlassian Cloud 명령줄 도구**
+>
+> - 🚀 **단일 바이너리** (런타임 불필요)
+> - 🎯 **60-70% 응답 최적화** (필드 필터링)
+> - 📄 **전체 페이지네이션** (`--all`로 모든 결과 조회)
+> - 🔧 **4단계 설정** (CLI → ENV → Project → Global)
 
-- **단일 바이너리** — 런타임 없이 바로 실행
-- **60-70% 응답 최적화** — 필요한 필드만 가져오기
-- **전체 페이지네이션** — `--all` 옵션으로 모든 결과 조회
-- **4단계 설정** — CLI > ENV > 프로젝트 > 전역
+---
 
-## 설치
+## ⚡ 빠른 시작 (1분)
 
+```bash
+# 1. 설치
+curl -fsSL https://raw.githubusercontent.com/junyeong-ai/atlassian-cli/main/scripts/install.sh | bash
+
+# 2. 설정 초기화
+atlassian-cli config init --global
+
+# 3. 설정 편집 (domain, email, token 입력)
+atlassian-cli config edit --global
+
+# 4. 사용 시작! 🎉
+atlassian-cli jira search "status = Open" --limit 5
+atlassian-cli confluence search "type=page" --limit 10
+```
+
+**Tip**: [API Token 생성](https://id.atlassian.com/manage-profile/security/api-tokens) 필요
+
+---
+
+## 🎯 주요 기능
+
+### Jira 작업
+```bash
+# 이슈 검색 (JQL)
+atlassian-cli jira search "project = PROJ AND status = Open" --limit 10
+atlassian-cli jira search "assignee = currentUser()" --fields key,summary,status
+
+# 이슈 조회/생성/수정
+atlassian-cli jira get PROJ-123
+atlassian-cli jira create PROJ "버그 수정" Bug --description "상세 내용"
+atlassian-cli jira update PROJ-123 '{"summary":"새 제목"}'
+
+# 댓글/상태 전환
+atlassian-cli jira comment add PROJ-123 "작업 완료"
+atlassian-cli jira transitions PROJ-123
+atlassian-cli jira transition PROJ-123 31
+```
+
+### Confluence 작업
+```bash
+# 페이지 검색 (CQL)
+atlassian-cli confluence search "type=page AND space=TEAM" --limit 10
+atlassian-cli confluence search "type=page" --all           # 전체 결과 조회
+atlassian-cli confluence search "type=page" --all --stream  # JSONL 스트리밍
+
+# 페이지 조회/생성/수정
+atlassian-cli confluence get 123456
+atlassian-cli confluence create TEAM "API 문서" "<p>내용</p>"
+atlassian-cli confluence update 123456 "새 제목" "<p>새 내용</p>"
+
+# 하위 페이지/댓글
+atlassian-cli confluence children 123456
+atlassian-cli confluence comments 123456
+```
+
+### 설정 & 최적화
+```bash
+# 설정 관리
+atlassian-cli config show            # 설정 표시 (토큰 마스킹)
+atlassian-cli config path            # 설정 파일 경로
+atlassian-cli config edit            # 에디터로 수정
+
+# JSON 출력
+atlassian-cli jira get PROJ-123 | jq -r '.fields.summary'
+```
+
+**중요 사항**:
+- 필드 최적화: 기본 17개 필드 (`description`, `id`, `renderedFields` 제외)
+- 프로젝트 필터: `projects_filter`로 JQL 자동 주입
+- ADF 자동 변환: 일반 텍스트 → Atlassian Document Format
+
+---
+
+## 📦 설치
+
+### 방법 1: Prebuilt Binary (권장) ⭐
+
+**자동 설치**:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/junyeong-ai/atlassian-cli/main/scripts/install.sh | bash
 ```
 
-또는 [Releases](https://github.com/junyeong-ai/atlassian-cli/releases)에서 바이너리 다운로드
+**수동 설치**:
+1. [Releases](https://github.com/junyeong-ai/atlassian-cli/releases)에서 바이너리 다운로드
+2. 압축 해제: `tar -xzf atlassian-cli-*.tar.gz`
+3. PATH에 이동: `mv atlassian-cli ~/.local/bin/`
 
-## 시작하기
+**지원 플랫폼**:
+- Linux: x86_64, aarch64
+- macOS: Intel (x86_64), Apple Silicon (aarch64)
+- Windows: x86_64
 
-```bash
-# 1. 설정 초기화
-atlassian-cli config init --global
-
-# 2. 설정 편집 (~/.config/atlassian-cli/config.toml)
-atlassian-cli config edit --global
-```
-
-```toml
-[default]
-domain = "company.atlassian.net"
-email = "user@example.com"
-token = "your-api-token"  # https://id.atlassian.com/manage-profile/security/api-tokens
-```
-
-## 사용법
-
-### Jira
+### 방법 2: 소스 빌드
 
 ```bash
-# 검색
-atlassian-cli jira search "status = Open" --limit 10
-atlassian-cli jira search "project = PROJ" --fields key,summary,status
-
-# 조회/생성/수정
-atlassian-cli jira get PROJ-123
-atlassian-cli jira create PROJ "제목" Bug --description "내용"
-atlassian-cli jira update PROJ-123 '{"summary":"새 제목"}'
-
-# 댓글/상태
-atlassian-cli jira comment add PROJ-123 "완료"
-atlassian-cli jira transition PROJ-123 31
+git clone https://github.com/junyeong-ai/atlassian-cli
+cd atlassian-cli
+cargo build --release
+cp target/release/atlassian-cli ~/.local/bin/
 ```
 
-### Confluence
+**Requirements**: Rust 1.91.1+
 
-```bash
-# 검색
-atlassian-cli confluence search "type=page" --limit 10
-atlassian-cli confluence search "space=TEAM" --all          # 전체 결과
-atlassian-cli confluence search "space=TEAM" --all --stream # JSONL 스트리밍
+### 🤖 Claude Code Skill (선택사항)
 
-# 조회/생성/수정
-atlassian-cli confluence get 123456
-atlassian-cli confluence create TEAM "페이지 제목" "<p>내용</p>"
-atlassian-cli confluence update 123456 "새 제목" "<p>새 내용</p>"
-```
+`./scripts/install.sh` 실행 시 Claude Code 스킬 설치 여부를 선택할 수 있습니다:
 
-### 설정 관리
+- **User-level** (권장): 모든 프로젝트에서 사용 가능
+- **Project-level**: Git을 통해 팀 자동 배포
+- **Skip**: 나중에 수동 설치
 
-```bash
-atlassian-cli config show   # 현재 설정 (토큰 마스킹)
-atlassian-cli config path   # 설정 파일 경로
-atlassian-cli config edit   # 편집기로 열기
-```
+---
 
-## 환경 변수
+## 🔑 API Token 생성
+
+1. [Atlassian API Tokens](https://id.atlassian.com/manage-profile/security/api-tokens) 접속
+2. "Create API token" 클릭
+3. 라벨 입력 (예: "atlassian-cli")
+4. 토큰 복사하여 설정에 추가
+
+**보안**: Token은 비밀번호와 동일하게 취급. 노출 시 즉시 재생성.
+
+---
+
+## ⚙️ 설정
+
+### 환경 변수
 
 ```bash
 export ATLASSIAN_DOMAIN="company.atlassian.net"
@@ -89,26 +155,158 @@ export ATLASSIAN_API_TOKEN="your-token"
 
 # 필드 최적화
 export JIRA_SEARCH_DEFAULT_FIELDS="key,summary,status"
+export JIRA_SEARCH_CUSTOM_FIELDS="customfield_10015"
 ```
 
-## 명령어 요약
+### 설정 파일
 
-| Jira | Confluence | Config |
-|------|------------|--------|
-| `get` `search` `create` `update` | `get` `search` `create` `update` | `init` `show` `edit` |
-| `comment add/update` | `children` `comments` | `path` `list` |
-| `transition` `transitions` | | |
+**위치**:
+- macOS/Linux: `~/.config/atlassian-cli/config.toml`
+- Windows: `%APPDATA%\atlassian-cli\config.toml`
+- Project: `./.atlassian.toml`
 
-### 주요 옵션
+**기본 설정** (`atlassian-cli config init`로 생성):
+```toml
+[default]
+domain = "company.atlassian.net"
+email = "user@example.com"
+token = "your-api-token"
 
-| 옵션 | 설명 |
-|------|------|
-| `--limit N` | 결과 개수 제한 |
-| `--all` | 전체 결과 (페이지네이션) |
-| `--stream` | JSONL 스트리밍 (`--all` 필요) |
-| `--fields` | 필드 지정 (Jira) |
+[default.jira]
+projects_filter = ["PROJ1", "PROJ2"]
 
-## 지원
+[default.confluence]
+spaces_filter = ["TEAM", "DOCS"]
 
-- [Issues](https://github.com/junyeong-ai/atlassian-cli/issues)
-- [개발자 가이드](CLAUDE.md)
+[default.performance]
+request_timeout_ms = 30000
+```
+
+### 설정 우선순위
+
+```
+CLI 플래그 > 환경 변수 > 프로젝트 설정 > 전역 설정
+```
+
+---
+
+## 🏗️ 핵심 구조
+
+4단계 설정 우선순위, ADF 자동 변환, 필드 최적화 (17개 기본 필드), 커서 기반 페이지네이션.
+상세한 아키텍처는 [CLAUDE.md](CLAUDE.md) 참고.
+
+---
+
+## 🔧 문제 해결
+
+### 설정을 찾을 수 없음
+
+```bash
+# 설정 확인
+atlassian-cli config path
+atlassian-cli config show
+
+# 재초기화
+atlassian-cli config init --global
+```
+
+### API 인증 실패
+
+**확인 사항**:
+- [ ] Domain 형식: `company.atlassian.net` (https:// 없이)
+- [ ] Email 형식 유효
+- [ ] Token 정확 (복사/붙여넣기 공백 주의)
+
+### 필드 필터링 안 됨
+
+**우선순위 확인**:
+1. CLI `--fields` (최우선)
+2. `JIRA_SEARCH_DEFAULT_FIELDS` 환경변수
+3. 기본 17개 필드 + `JIRA_SEARCH_CUSTOM_FIELDS`
+
+```bash
+# 테스트
+JIRA_SEARCH_DEFAULT_FIELDS="key,summary" atlassian-cli jira search "project = PROJ"
+```
+
+### 프로젝트 필터 자동 주입
+
+`projects_filter` 설정 시 JQL에 자동 주입:
+```
+입력: status = Open
+실행: project IN (PROJ1,PROJ2) AND (status = Open)
+```
+
+---
+
+## 📚 명령어 참조
+
+### Jira 명령어
+
+| 명령어 | 설명 | 예제 |
+|--------|------|------|
+| `get <KEY>` | 이슈 조회 | `jira get PROJ-123` |
+| `search <JQL>` | JQL 검색 | `jira search "status = Open" --limit 10` |
+| `create <PROJECT> <SUMMARY> <TYPE>` | 이슈 생성 | `jira create PROJ "Title" Bug` |
+| `update <KEY> <JSON>` | 이슈 수정 | `jira update PROJ-123 '{"summary":"New"}'` |
+| `comment add <KEY> <TEXT>` | 댓글 추가 | `jira comment add PROJ-123 "Done"` |
+| `transitions <KEY>` | 전환 목록 | `jira transitions PROJ-123` |
+| `transition <KEY> <ID>` | 상태 전환 | `jira transition PROJ-123 31` |
+
+### Confluence 명령어
+
+| 명령어 | 설명 | 예제 |
+|--------|------|------|
+| `search <CQL>` | CQL 검색 | `confluence search "type=page" --limit 10` |
+| `get <ID>` | 페이지 조회 | `confluence get 123456` |
+| `create <SPACE> <TITLE> <CONTENT>` | 페이지 생성 | `confluence create TEAM "Title" "<p>HTML</p>"` |
+| `update <ID> <TITLE> <CONTENT>` | 페이지 수정 | `confluence update 123456 "Title" "<p>HTML</p>"` |
+| `children <ID>` | 하위 페이지 | `confluence children 123456` |
+| `comments <ID>` | 댓글 조회 | `confluence comments 123456` |
+
+### Config 명령어
+
+| 명령어 | 설명 | 예제 |
+|--------|------|------|
+| `init [--global]` | 설정 초기화 | `config init --global` |
+| `show` | 설정 표시 | `config show` |
+| `edit [--global]` | 에디터로 수정 | `config edit` |
+| `path [--global]` | 파일 경로 | `config path` |
+| `list` | 위치 나열 | `config list` |
+
+### 공통 옵션
+
+| 옵션 | 설명 | 적용 범위 |
+|------|------|-----------|
+| `--domain` | Domain 오버라이드 | 모든 명령어 |
+| `--email` | Email 오버라이드 | 모든 명령어 |
+| `--token` | Token 오버라이드 | 모든 명령어 |
+| `--limit <N>` | 결과 개수 제한 | search |
+| `--all` | 전체 결과 (페이지네이션) | confluence search |
+| `--stream` | JSONL 스트리밍 | confluence search (--all 필요) |
+| `--fields` | 필드 지정 | jira search, jira get |
+
+---
+
+## 🚀 개발자 가이드
+
+**아키텍처, 디버깅, 기여 방법**: [CLAUDE.md](CLAUDE.md) 참고
+
+---
+
+## 💬 지원
+
+- **GitHub Issues**: [문제 신고](https://github.com/junyeong-ai/atlassian-cli/issues)
+- **개발자 문서**: [CLAUDE.md](CLAUDE.md)
+
+---
+
+<div align="center">
+
+**🌐 한국어** | **[English](README.en.md)**
+
+**Version 0.1.0** • Rust 2024 Edition
+
+Made with ❤️ for productivity
+
+</div>
