@@ -1,6 +1,7 @@
 use crate::config::Config;
 use crate::confluence::fields::{apply_expand_filtering, apply_v2_filtering};
 use crate::confluence::markdown::convert_to_markdown;
+use crate::filter;
 use crate::http;
 use anyhow::Result;
 use reqwest::Client;
@@ -76,7 +77,9 @@ pub async fn search(
         .await?;
 
     if !response.status().is_success() {
-        anyhow::bail!("Search failed: {}", response.status());
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!("Search failed ({}): {}", status, body);
     }
 
     let mut data: Value = response.json().await?;
@@ -85,10 +88,18 @@ pub async fn search(
         convert_results_to_markdown(&mut data);
     }
 
-    Ok(json!({
-        "items": data["results"],
-        "total": data["totalSize"]
-    }))
+    let results = data["results"].as_array().cloned().unwrap_or_default();
+    let count = results.len();
+    let total = data["totalSize"].as_u64().unwrap_or(count as u64);
+
+    let mut output = json!({
+        "items": results,
+        "count": count,
+        "total": total
+    });
+
+    filter::apply(&mut output, config);
+    Ok(output)
 }
 
 pub async fn search_all(
@@ -124,6 +135,8 @@ pub async fn search_all(
             )
             .await?
         };
+
+        filter::apply(&mut data, config);
 
         if as_markdown {
             convert_results_to_markdown(&mut data);
@@ -196,7 +209,9 @@ async fn fetch_initial_page(
         .await?;
 
     if !response.status().is_success() {
-        anyhow::bail!("Search failed: {}", response.status());
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!("Search failed ({}): {}", status, body);
     }
 
     response.json().await.map_err(Into::into)
@@ -211,7 +226,9 @@ async fn fetch_page(client: &Client, url: &str, config: &Config) -> Result<Value
         .await?;
 
     if !response.status().is_success() {
-        anyhow::bail!("Search failed: {}", response.status());
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!("Search failed ({}): {}", status, body);
     }
 
     response.json().await.map_err(Into::into)
@@ -238,10 +255,13 @@ pub async fn get_page(
         .await?;
 
     if !response.status().is_success() {
-        anyhow::bail!("Failed to get page: {}", response.status());
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!("Failed to get page ({}): {}", status, body);
     }
 
     let mut data: Value = response.json().await?;
+    filter::apply(&mut data, config);
 
     if as_markdown {
         convert_page_to_markdown(&mut data);
@@ -250,12 +270,7 @@ pub async fn get_page(
     Ok(data)
 }
 
-pub async fn get_page_children(
-    page_id: &str,
-    include_all_fields: Option<bool>,
-    additional_includes: Option<Vec<String>>,
-    config: &Config,
-) -> Result<Value> {
+pub async fn get_page_children(page_id: &str, config: &Config) -> Result<Value> {
     let client = http::client(config);
     let url = format!(
         "{}/wiki/api/v2/pages/{}/children",
@@ -263,30 +278,26 @@ pub async fn get_page_children(
         page_id
     );
 
-    let query_params = apply_v2_filtering(include_all_fields, additional_includes);
-
     let response = client
         .get(&url)
         .header("Authorization", http::auth_header(config))
         .header("Accept", "application/json")
-        .query(&query_params)
         .send()
         .await?;
 
     if !response.status().is_success() {
-        anyhow::bail!("Failed to get child pages: {}", response.status());
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!("Failed to get child pages ({}): {}", status, body);
     }
 
-    let data: Value = response.json().await?;
+    let mut data: Value = response.json().await?;
+    filter::apply(&mut data, config);
+
     Ok(json!({"items": data["results"]}))
 }
 
-pub async fn get_comments(
-    page_id: &str,
-    include_all_fields: Option<bool>,
-    additional_includes: Option<Vec<String>>,
-    config: &Config,
-) -> Result<Value> {
+pub async fn get_comments(page_id: &str, as_markdown: bool, config: &Config) -> Result<Value> {
     let client = http::client(config);
     let url = format!(
         "{}/wiki/api/v2/pages/{}/footer-comments",
@@ -294,21 +305,27 @@ pub async fn get_comments(
         page_id
     );
 
-    let query_params = apply_v2_filtering(include_all_fields, additional_includes);
-
     let response = client
         .get(&url)
         .header("Authorization", http::auth_header(config))
         .header("Accept", "application/json")
-        .query(&query_params)
+        .query(&[("body-format", "storage")])
         .send()
         .await?;
 
     if !response.status().is_success() {
-        anyhow::bail!("Failed to get comments: {}", response.status());
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!("Failed to get comments ({}): {}", status, body);
     }
 
-    let data: Value = response.json().await?;
+    let mut data: Value = response.json().await?;
+    filter::apply(&mut data, config);
+
+    if as_markdown {
+        convert_comments_to_markdown(&mut data);
+    }
+
     Ok(json!({"items": data["results"]}))
 }
 
@@ -334,11 +351,9 @@ pub async fn create_page(
         .await?;
 
     if !space_response.status().is_success() {
-        anyhow::bail!(
-            "Failed to get space ID for key '{}': {}",
-            space_key,
-            space_response.status()
-        );
+        let status = space_response.status();
+        let body = space_response.text().await.unwrap_or_default();
+        anyhow::bail!("Failed to get space '{}' ({}): {}", space_key, status, body);
     }
 
     let space_data: Value = space_response.json().await?;
@@ -372,8 +387,9 @@ pub async fn create_page(
         .await?;
 
     if !response.status().is_success() {
-        let error = response.text().await?;
-        anyhow::bail!("Failed to create page: {}", error);
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!("Failed to create page ({}): {}", status, body);
     }
 
     let data: Value = response.json().await?;
@@ -405,7 +421,9 @@ pub async fn update_page(
         .await?;
 
     if !get_response.status().is_success() {
-        anyhow::bail!("Failed to get page for update: {}", get_response.status());
+        let status = get_response.status();
+        let body = get_response.text().await.unwrap_or_default();
+        anyhow::bail!("Failed to get page for update ({}): {}", status, body);
     }
 
     let current_page: Value = get_response.json().await?;
@@ -440,8 +458,9 @@ pub async fn update_page(
         .await?;
 
     if !response.status().is_success() {
-        let error = response.text().await?;
-        anyhow::bail!("Failed to update page: {}", error);
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!("Failed to update page ({}): {}", status, body);
     }
 
     let data: Value = response.json().await?;
@@ -479,6 +498,24 @@ fn convert_page_to_markdown(data: &mut Value) {
     };
     if let Some(html) = body.as_str().map(|s| s.to_string()) {
         *body = Value::String(convert_to_markdown(&html));
+    }
+}
+
+fn convert_comments_to_markdown(data: &mut Value) {
+    let Some(results) = data.get_mut("results").and_then(|r| r.as_array_mut()) else {
+        return;
+    };
+    for item in results {
+        let Some(body) = item
+            .get_mut("body")
+            .and_then(|b| b.get_mut("storage"))
+            .and_then(|s| s.get_mut("value"))
+        else {
+            continue;
+        };
+        if let Some(html) = body.as_str().map(|s| s.to_string()) {
+            *body = Value::String(convert_to_markdown(&html));
+        }
     }
 }
 
