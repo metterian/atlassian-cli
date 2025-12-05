@@ -54,25 +54,24 @@ struct JiraCommand {
 enum JiraSubcommand {
     Get {
         issue_key: String,
-        #[arg(
-            long,
-            value_enum,
-            default_value = "html",
-            help = "Output format for description/comments"
-        )]
+        #[arg(long, value_enum, default_value = "html", help = "ADF content format")]
         format: OutputFormat,
     },
     Search {
         jql: String,
-        #[arg(long, default_value = "20")]
+        #[arg(long, default_value = "20", help = "Maximum results to return")]
         limit: u32,
-        #[arg(long, value_delimiter = ',')]
+        #[arg(
+            long,
+            value_delimiter = ',',
+            help = "Fields to return (overrides defaults)"
+        )]
         fields: Option<Vec<String>>,
         #[arg(
             long,
             value_enum,
             default_value = "html",
-            help = "Output format for description/comments"
+            help = "ADF content format (markdown auto-includes description)"
         )]
         format: OutputFormat,
     },
@@ -123,34 +122,28 @@ struct ConfluenceCommand {
 enum ConfluenceSubcommand {
     Search {
         query: String,
-        #[arg(long, default_value = "10")]
+        #[arg(
+            long,
+            default_value = "10",
+            help = "Results per page (max 250). With --all, controls batch size"
+        )]
         limit: u32,
-        #[arg(long, help = "Fetch all pages using cursor-based pagination")]
+        #[arg(long, help = "Fetch all results via cursor pagination")]
         all: bool,
-        #[arg(long, help = "Stream results as JSONL (requires --all)")]
+        #[arg(long, help = "Stream as JSONL (requires --all)")]
         stream: bool,
         #[arg(
             long,
             value_delimiter = ',',
-            help = "Fields to expand (e.g., body.storage,ancestors)"
+            help = "Expand fields (e.g., body.storage,ancestors)"
         )]
         expand: Option<Vec<String>>,
-        #[arg(
-            long,
-            value_enum,
-            default_value = "html",
-            help = "Output format for body content"
-        )]
+        #[arg(long, value_enum, default_value = "html", help = "Body content format")]
         format: OutputFormat,
     },
     Get {
         page_id: String,
-        #[arg(
-            long,
-            value_enum,
-            default_value = "html",
-            help = "Output format for body content"
-        )]
+        #[arg(long, value_enum, default_value = "html", help = "Body content format")]
         format: OutputFormat,
     },
     Create {
@@ -168,6 +161,8 @@ enum ConfluenceSubcommand {
     },
     Comments {
         page_id: String,
+        #[arg(long, value_enum, default_value = "html", help = "Body content format")]
+        format: OutputFormat,
     },
 }
 
@@ -193,6 +188,7 @@ enum ConfigSubcommand {
         #[arg(long)]
         global: bool,
     },
+    Validate,
 }
 
 #[tokio::main]
@@ -339,7 +335,6 @@ async fn handle_config(cmd: ConfigCommand) -> Result<()> {
             let path = if global {
                 atlassian_cli::Config::global_config_path()
             } else {
-                // Try project config first, fall back to global
                 atlassian_cli::Config::project_config_path()
                     .or_else(atlassian_cli::Config::global_config_path)
             };
@@ -371,6 +366,48 @@ async fn handle_config(cmd: ConfigCommand) -> Result<()> {
             }
 
             println!("Config file edited: {:?}", path);
+            Ok(())
+        }
+        ConfigSubcommand::Validate => {
+            let config = atlassian_cli::Config::load(None, None, None, None, None)?;
+
+            let client = reqwest::Client::new();
+            let url = format!("{}/rest/api/3/myself", config.base_url());
+
+            let response = client
+                .get(&url)
+                .header(
+                    "Authorization",
+                    format!(
+                        "Basic {}",
+                        base64::Engine::encode(
+                            &base64::engine::general_purpose::STANDARD,
+                            format!("{}:{}", config.email(), config.token())
+                        )
+                    ),
+                )
+                .header("Accept", "application/json")
+                .send()
+                .await?;
+
+            if response.status().is_success() {
+                let data: serde_json::Value = response.json().await?;
+                println!("✓ Configuration valid");
+                println!("  Domain: {}", config.domain());
+                println!(
+                    "  User: {}",
+                    data["displayName"].as_str().unwrap_or("Unknown")
+                );
+                println!(
+                    "  Email: {}",
+                    data["emailAddress"].as_str().unwrap_or("Unknown")
+                );
+            } else {
+                let status = response.status();
+                let body = response.text().await.unwrap_or_default();
+                anyhow::bail!("Authentication failed ({}): {}", status, body);
+            }
+
             Ok(())
         }
     }
@@ -445,17 +482,6 @@ async fn handle_confluence(
 ) -> Result<serde_json::Value> {
     use atlassian_cli::confluence;
 
-    let as_markdown = matches!(
-        cmd.subcommand,
-        ConfluenceSubcommand::Search {
-            format: OutputFormat::Markdown,
-            ..
-        } | ConfluenceSubcommand::Get {
-            format: OutputFormat::Markdown,
-            ..
-        }
-    );
-
     match cmd.subcommand {
         ConfluenceSubcommand::Search {
             query,
@@ -463,15 +489,20 @@ async fn handle_confluence(
             all,
             stream,
             expand,
-            format: _,
+            format,
         } => {
+            if stream && !all {
+                anyhow::bail!("--stream requires --all flag");
+            }
+            let as_markdown = matches!(format, OutputFormat::Markdown);
             if all {
                 confluence::search_all(&query, None, expand, stream, as_markdown, config).await
             } else {
                 confluence::search(&query, limit, None, expand, as_markdown, config).await
             }
         }
-        ConfluenceSubcommand::Get { page_id, format: _ } => {
+        ConfluenceSubcommand::Get { page_id, format } => {
+            let as_markdown = matches!(format, OutputFormat::Markdown);
             confluence::get_page(&page_id, None, None, as_markdown, config).await
         }
         ConfluenceSubcommand::Create {
@@ -485,10 +516,11 @@ async fn handle_confluence(
             content,
         } => confluence::update_page(&page_id, &title, &content, None, None, config).await,
         ConfluenceSubcommand::Children { page_id } => {
-            confluence::get_page_children(&page_id, None, None, config).await
+            confluence::get_page_children(&page_id, config).await
         }
-        ConfluenceSubcommand::Comments { page_id } => {
-            confluence::get_comments(&page_id, None, None, config).await
+        ConfluenceSubcommand::Comments { page_id, format } => {
+            let as_markdown = matches!(format, OutputFormat::Markdown);
+            confluence::get_comments(&page_id, as_markdown, config).await
         }
     }
 }
