@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::filter;
 use crate::http;
 use crate::jira::adf;
 use crate::jira::fields;
@@ -91,7 +92,9 @@ pub async fn get_issue(issue_key: &str, as_markdown: bool, config: &Config) -> R
         .await?;
 
     if !response.status().is_success() {
-        anyhow::bail!("Failed to get issue: {}", response.status());
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!("Failed to get issue ({}): {}", status, body);
     }
 
     let mut data: Value = response.json().await?;
@@ -100,6 +103,7 @@ pub async fn get_issue(issue_key: &str, as_markdown: bool, config: &Config) -> R
         convert_issue_to_markdown(&mut data);
     }
 
+    filter::apply(&mut data, config);
     Ok(data)
 }
 
@@ -111,42 +115,39 @@ pub async fn search(
     config: &Config,
 ) -> Result<Value> {
     let final_jql = apply_project_filter(jql, config);
-
     let client = http::client(config);
     let url = format!("{}/rest/api/3/search/jql", config.base_url());
 
-    let resolved_fields = fields::resolve_search_fields(fields, config);
+    let resolved_fields = fields::resolve_search_fields(fields, as_markdown, config);
 
-    tracing::info!(
-        "Jira search JQL: {}, {} fields: {}",
-        final_jql,
-        resolved_fields.len(),
-        resolved_fields.join(",")
-    );
-
-    let query_params = vec![
-        ("jql".to_string(), final_jql),
-        ("maxResults".to_string(), limit.to_string()),
-        ("fields".to_string(), resolved_fields.join(",")),
-    ];
+    let body = json!({
+        "jql": final_jql,
+        "maxResults": limit,
+        "fields": resolved_fields,
+    });
 
     let response = client
-        .get(&url)
+        .post(&url)
         .header("Authorization", http::auth_header(config))
-        .header("Accept", "application/json")
-        .query(&query_params)
+        .header("Content-Type", "application/json")
+        .json(&body)
         .send()
         .await?;
 
     if !response.status().is_success() {
-        let error = response.text().await?;
-        anyhow::bail!("Search failed: {}", error);
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!("Search failed ({}): {}", status, body);
     }
 
-    let data: Value = response.json().await?;
+    let mut data: Value = response.json().await?;
+    filter::apply(&mut data, config);
+
+    let issues = data["issues"].as_array().cloned().unwrap_or_default();
+    let count = issues.len();
     let mut result = json!({
-        "items": data["issues"],
-        "total": data["total"]
+        "items": issues,
+        "count": count
     });
 
     if as_markdown {
@@ -230,7 +231,9 @@ pub async fn update_issue(
         .await?;
 
     if !response.status().is_success() {
-        anyhow::bail!("Failed to update issue: {}", response.status());
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!("Failed to update issue ({}): {}", status, body);
     }
 
     Ok(json!({}))
@@ -261,7 +264,9 @@ pub async fn add_comment(issue_key: &str, comment: Value, config: &Config) -> Re
         .await?;
 
     if !response.status().is_success() {
-        anyhow::bail!("Failed to add comment: {}", response.status());
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!("Failed to add comment ({}): {}", status, body);
     }
 
     let data: Value = response.json().await?;
@@ -334,7 +339,9 @@ pub async fn transition_issue(
         .await?;
 
     if !response.status().is_success() {
-        anyhow::bail!("Failed to transition issue: {}", response.status());
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!("Failed to transition issue ({}): {}", status, body);
     }
 
     Ok(json!({}))
@@ -358,10 +365,13 @@ pub async fn get_transitions(issue_key: &str, config: &Config) -> Result<Value> 
         .await?;
 
     if !response.status().is_success() {
-        anyhow::bail!("Failed to get transitions: {}", response.status());
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!("Failed to get transitions ({}): {}", status, body);
     }
 
     let mut data: Value = response.json().await?;
+    filter::apply(&mut data, config);
     Ok(data["transitions"].take())
 }
 
@@ -631,13 +641,17 @@ mod tests {
 
     #[test]
     fn test_search_no_fields_uses_default() {
-        // Test that when no fields are specified, we use defaults
         let config = create_test_config(vec![], None);
-        let api_fields = None;
+        let result = fields::resolve_search_fields(None, false, &config);
+        assert_eq!(result.len(), 17);
+    }
 
-        // This would be resolved by fields::resolve_search_fields
-        let result = fields::resolve_search_fields(api_fields, &config);
-        assert_eq!(result.len(), 17); // DEFAULT_SEARCH_FIELDS count
+    #[test]
+    fn test_search_markdown_includes_description() {
+        let config = create_test_config(vec![], None);
+        let result = fields::resolve_search_fields(None, true, &config);
+        assert_eq!(result.len(), 18);
+        assert!(result.contains(&"description".to_string()));
     }
 
     #[test]
