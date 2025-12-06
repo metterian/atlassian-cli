@@ -31,6 +31,11 @@ static MX_FILE_RE: LazyLock<Regex> =
 static LONG_BASE64_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"[A-Za-z0-9+/=]{500,}"#).unwrap());
 
+// Match 10+ consecutive whitespace characters (spaces, tabs, but not newlines)
+// AI agents parse structure via delimiters (|, \n), not visual alignment
+static CONSECUTIVE_SPACES_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"[^\S\n]{10,}"#).unwrap());
+
 pub fn clean_metadata(html: &str) -> String {
     let mut result = html.to_string();
 
@@ -51,6 +56,7 @@ pub fn clean_binary_data(content: &str) -> String {
     result = MX_GRAPH_MODEL_RE.replace_all(&result, "").to_string();
     result = MX_FILE_RE.replace_all(&result, "").to_string();
     result = LONG_BASE64_RE.replace_all(&result, "").to_string();
+    result = CONSECUTIVE_SPACES_RE.replace_all(&result, " ").to_string();
 
     result.trim().to_string()
 }
@@ -108,5 +114,40 @@ mod tests {
         let content = format!("before {} after", base64);
         let result = clean_binary_data(&content);
         assert_eq!(result, "before  after");
+    }
+
+    #[test]
+    fn test_remove_consecutive_spaces() {
+        // Simulate table cell padding with 5000+ spaces
+        let spaces = " ".repeat(5132);
+        let content = format!("Data{}more text", spaces);
+        let result = clean_binary_data(&content);
+        assert_eq!(result, "Data more text");
+    }
+
+    #[test]
+    fn test_preserve_normal_spaces() {
+        // Normal spacing (< 10 chars) should be preserved
+        let content = "word1 word2  word3   word4";
+        let result = clean_binary_data(content);
+        assert_eq!(result, "word1 word2  word3   word4");
+    }
+
+    #[test]
+    fn test_collapse_10_plus_spaces() {
+        // 10+ consecutive spaces collapsed to single space
+        let spaces = " ".repeat(15);
+        let content = format!("col1{}col2", spaces);
+        let result = clean_binary_data(&content);
+        assert_eq!(result, "col1 col2");
+    }
+
+    #[test]
+    fn test_preserve_newlines() {
+        // Newlines should be preserved, only horizontal whitespace collapsed
+        let spaces = " ".repeat(20);
+        let content = format!("line1{}continued\nline2", spaces);
+        let result = clean_binary_data(&content);
+        assert_eq!(result, "line1 continued\nline2");
     }
 }
