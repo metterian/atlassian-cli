@@ -6,6 +6,9 @@ use crate::jira::fields;
 use crate::markdown::adf_to_markdown;
 use anyhow::Result;
 use serde_json::{Value, json};
+use std::io::{self, Write};
+use std::time::Duration;
+use tokio::time::sleep;
 
 fn convert_issue_to_markdown(issue: &mut Value) {
     let Some(fields) = issue.get_mut("fields") else {
@@ -19,7 +22,6 @@ fn convert_issue_to_markdown(issue: &mut Value) {
     }
 }
 
-/// Convert ADF description fields to Markdown in search results
 fn convert_issues_to_markdown(result: &mut Value) {
     let Some(items) = result.get_mut("items").and_then(|i| i.as_array_mut()) else {
         return;
@@ -30,13 +32,13 @@ fn convert_issues_to_markdown(result: &mut Value) {
     }
 }
 
-/// Apply project filter to JQL query if configured
+const MAX_RESULTS_PER_PAGE: u32 = 100;
+
 fn apply_project_filter(jql: &str, config: &Config) -> String {
     if config.jira.projects_filter.is_empty() {
         return jql.to_string();
     }
 
-    // Split JQL at ORDER BY to avoid placing ORDER BY inside parentheses
     let jql_lower = jql.to_lowercase();
     let (conditions, order_by) = if let Some(pos) = jql_lower.find(" order by ") {
         (jql[..pos].to_string(), Some(jql[pos..].to_string()))
@@ -46,7 +48,6 @@ fn apply_project_filter(jql: &str, config: &Config) -> String {
         (jql.to_string(), None)
     };
 
-    // Check if JQL already contains project condition
     let conditions_lower = conditions.to_lowercase();
     if conditions_lower.contains("project ")
         || conditions_lower.contains("project=")
@@ -55,7 +56,6 @@ fn apply_project_filter(jql: &str, config: &Config) -> String {
         return jql.to_string();
     }
 
-    // Build project filter
     let projects = config
         .jira
         .projects_filter
@@ -154,6 +154,111 @@ pub async fn search(
     }
 
     Ok(result)
+}
+
+pub async fn search_all(
+    jql: &str,
+    fields: Option<Vec<String>>,
+    stream: bool,
+    as_markdown: bool,
+    config: &Config,
+) -> Result<Value> {
+    let final_jql = apply_project_filter(jql, config);
+    let client = http::client(config);
+    let url = format!("{}/rest/api/3/search/jql", config.base_url());
+    let resolved_fields = fields::resolve_search_fields(fields, as_markdown, config);
+
+    let mut all_issues: Vec<Value> = Vec::new();
+    let mut page_num = 1;
+    let mut next_page_token: Option<String> = None;
+    let mut total_count: u64 = 0;
+
+    loop {
+        let mut body = json!({
+            "jql": final_jql,
+            "maxResults": MAX_RESULTS_PER_PAGE,
+            "fields": resolved_fields,
+        });
+
+        if let Some(ref token) = next_page_token {
+            body["nextPageToken"] = json!(token);
+        }
+
+        let response = client
+            .post(&url)
+            .header("Authorization", http::auth_header(config))
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            anyhow::bail!("Search failed ({}): {}", status, body);
+        }
+
+        let mut data: Value = response.json().await?;
+        filter::apply(&mut data, config);
+
+        if page_num == 1 {
+            total_count = data["total"].as_u64().unwrap_or(0);
+        }
+
+        let issues = data["issues"].as_array().cloned().unwrap_or_default();
+        let count = issues.len();
+
+        let processed_issues: Vec<Value> = if as_markdown {
+            issues
+                .into_iter()
+                .map(|mut issue| {
+                    convert_issue_to_markdown(&mut issue);
+                    issue
+                })
+                .collect()
+        } else {
+            issues
+        };
+
+        if stream {
+            for issue in &processed_issues {
+                println!("{}", serde_json::to_string(issue)?);
+            }
+            io::stdout().flush()?;
+        }
+
+        all_issues.extend(processed_issues);
+
+        eprintln!(
+            "  Page {}: {} issues (fetched: {}/{})",
+            page_num,
+            count,
+            all_issues.len(),
+            total_count
+        );
+
+        next_page_token = data["nextPageToken"].as_str().map(String::from);
+        if next_page_token.is_none() || count == 0 {
+            break;
+        }
+
+        page_num += 1;
+        sleep(Duration::from_millis(
+            config.performance.rate_limit_delay_ms,
+        ))
+        .await;
+    }
+
+    eprintln!("\nTotal: {} issues fetched", all_issues.len());
+
+    if stream {
+        Ok(json!({"streamed": true, "total": all_issues.len()}))
+    } else {
+        Ok(json!({
+            "items": all_issues,
+            "total": all_issues.len()
+        }))
+    }
 }
 
 pub async fn create_issue(

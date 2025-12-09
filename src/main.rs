@@ -59,20 +59,15 @@ enum JiraSubcommand {
     },
     Search {
         jql: String,
-        #[arg(long, default_value = "20", help = "Maximum results to return")]
+        #[arg(long, default_value = "100", help = "Results per page")]
         limit: u32,
-        #[arg(
-            long,
-            value_delimiter = ',',
-            help = "Fields to return (overrides defaults)"
-        )]
+        #[arg(long, help = "Fetch all results via token pagination")]
+        all: bool,
+        #[arg(long, help = "Stream as JSONL (requires --all)")]
+        stream: bool,
+        #[arg(long, value_delimiter = ',', help = "Fields to return")]
         fields: Option<Vec<String>>,
-        #[arg(
-            long,
-            value_enum,
-            default_value = "html",
-            help = "ADF content format (markdown auto-includes description)"
-        )]
+        #[arg(long, value_enum, default_value = "html", help = "ADF content format")]
         format: OutputFormat,
     },
     Create {
@@ -427,11 +422,20 @@ async fn handle_jira(
         JiraSubcommand::Search {
             jql,
             limit,
+            all,
+            stream,
             fields,
             format,
         } => {
+            if stream && !all {
+                anyhow::bail!("--stream requires --all flag");
+            }
             let as_markdown = matches!(format, OutputFormat::Markdown);
-            jira::search(&jql, limit, fields, as_markdown, config).await
+            if all {
+                jira::search_all(&jql, fields, stream, as_markdown, config).await
+            } else {
+                jira::search(&jql, limit, fields, as_markdown, config).await
+            }
         }
         JiraSubcommand::Create {
             project,
