@@ -114,6 +114,7 @@ fn apply_space_filter(cql: &str, config: &Config) -> String {
 | `confluence/api.rs` | `SEARCH_BODY_LIMIT` | 50 | ❌ API limit |
 | `config.rs` | `request_timeout_ms` | 30000 | ✅ `[performance]` |
 | `config.rs` | `rate_limit_delay_ms` | 200 | ✅ `[performance]` |
+| `jira/api.rs` | `MAX_RESULTS_PER_PAGE` | 100 | ❌ API optimal |
 
 ## API Endpoints
 
@@ -127,7 +128,9 @@ fn apply_space_filter(cql: &str, config: &Config) -> String {
 |--------|-------------|------------|
 | `--format` | Output format: `html` (default, raw ADF) or `markdown` | get, search |
 | `--fields` | Specify fields to return | search |
-| `--limit N` | Max results (default: 20) | search |
+| `--limit N` | Max results per page (default: 100) | search |
+| `--all` | Fetch all results via token pagination | search |
+| `--stream` | Output JSONL (requires --all) | search |
 
 ## CLI Options (Confluence)
 

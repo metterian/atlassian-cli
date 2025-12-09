@@ -20,6 +20,10 @@ atlassian-cli jira get PROJ-123 --format markdown
 atlassian-cli jira search "assignee = currentUser()" --format markdown --limit 20
 atlassian-cli jira search "project = PROJ" --fields key,summary,status --limit 50
 
+# Pagination (large datasets)
+atlassian-cli jira search "project = PROJ" --all --format markdown
+atlassian-cli jira search "project = PROJ" --all --stream > issues.jsonl
+
 # Create/Update
 atlassian-cli jira create PROJ "Summary" Bug --description "Plain text"
 atlassian-cli jira update PROJ-123 '{"summary": "New title", "description": "Plain text"}'
@@ -85,6 +89,15 @@ atlassian-cli confluence comments 12345 --format markdown
 | `--expand <fields>` | Additional fields: `ancestors`, `space` (body.storage included by default) | search |
 
 Note: `children` does not support `--format` (v2 API limitation).
+
+## Common Options (Both Jira & Confluence)
+
+| Option | Jira | Confluence |
+|--------|------|------------|
+| `--all` | Token pagination | Cursor pagination |
+| `--stream` | JSONL output (requires --all) | JSONL output (requires --all) |
+| `--format markdown` | ADF → Markdown | HTML → Markdown |
+| `--limit N` | Results per page (default: 100) | Results per page (default: 10) |
 
 ## Authentication
 

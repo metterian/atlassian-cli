@@ -48,6 +48,8 @@ atlassian-cli confluence search "type=page" --limit 10
 atlassian-cli jira search "project = PROJ AND status = Open" --limit 10
 atlassian-cli jira search "assignee = currentUser()" --fields key,summary,status
 atlassian-cli jira search "status = Open" --format markdown  # ADF → Markdown
+atlassian-cli jira search "project = PROJ" --all             # Fetch all results
+atlassian-cli jira search "project = PROJ" --all --stream    # JSONL streaming
 
 # Get/Create/Update issues
 atlassian-cli jira get PROJ-123
@@ -257,6 +259,8 @@ Executed: project IN (PROJ1,PROJ2) AND (status = Open)
 | `get <KEY>` | Get issue | `jira get PROJ-123` |
 | `get <KEY> --format markdown` | Get issue (Markdown) | `jira get PROJ-123 --format markdown` |
 | `search <JQL>` | JQL search | `jira search "status = Open" --limit 10` |
+| `search <JQL> --all` | Fetch all results | `jira search "project = PROJ" --all` |
+| `search <JQL> --all --stream` | JSONL streaming | `jira search "project = PROJ" --all --stream` |
 | `search <JQL> --format markdown` | JQL search (Markdown) | `jira search "status = Open" --format markdown` |
 | `create <PROJECT> <SUMMARY> <TYPE>` | Create issue | `jira create PROJ "Title" Bug` |
 | `update <KEY> <JSON>` | Update issue | `jira update PROJ-123 '{"summary":"New"}'` |
@@ -297,8 +301,8 @@ Executed: project IN (PROJ1,PROJ2) AND (status = Open)
 | `--email` | Override email | All commands |
 | `--token` | Override token | All commands |
 | `--limit <N>` | Limit results | search |
-| `--all` | All results (pagination) | confluence search |
-| `--stream` | JSONL streaming | confluence search (requires --all) |
+| `--all` | All results (pagination) | jira search, confluence search |
+| `--stream` | JSONL streaming | jira search, confluence search (requires --all) |
 | `--expand` | Additional expand fields (ancestors, etc.; body.storage included by default) | confluence search |
 | `--format` | Output format (html, markdown) | jira get/search, confluence search/get/comments |
 | `--fields` | Specify fields | jira search, jira get |

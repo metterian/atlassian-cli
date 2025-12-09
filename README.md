@@ -48,6 +48,8 @@ atlassian-cli confluence search "type=page" --limit 10
 atlassian-cli jira search "project = PROJ AND status = Open" --limit 10
 atlassian-cli jira search "assignee = currentUser()" --fields key,summary,status
 atlassian-cli jira search "status = Open" --format markdown  # ADF → Markdown 변환
+atlassian-cli jira search "project = PROJ" --all             # 전체 결과 조회
+atlassian-cli jira search "project = PROJ" --all --stream    # JSONL 스트리밍
 
 # 이슈 조회/생성/수정
 atlassian-cli jira get PROJ-123
@@ -257,6 +259,8 @@ JIRA_SEARCH_DEFAULT_FIELDS="key,summary" atlassian-cli jira search "project = PR
 | `get <KEY>` | 이슈 조회 | `jira get PROJ-123` |
 | `get <KEY> --format markdown` | 이슈 조회 (Markdown) | `jira get PROJ-123 --format markdown` |
 | `search <JQL>` | JQL 검색 | `jira search "status = Open" --limit 10` |
+| `search <JQL> --all` | 전체 결과 조회 | `jira search "project = PROJ" --all` |
+| `search <JQL> --all --stream` | JSONL 스트리밍 | `jira search "project = PROJ" --all --stream` |
 | `search <JQL> --format markdown` | JQL 검색 (Markdown) | `jira search "status = Open" --format markdown` |
 | `create <PROJECT> <SUMMARY> <TYPE>` | 이슈 생성 | `jira create PROJ "Title" Bug` |
 | `update <KEY> <JSON>` | 이슈 수정 | `jira update PROJ-123 '{"summary":"New"}'` |
@@ -297,8 +301,8 @@ JIRA_SEARCH_DEFAULT_FIELDS="key,summary" atlassian-cli jira search "project = PR
 | `--email` | Email 오버라이드 | 모든 명령어 |
 | `--token` | Token 오버라이드 | 모든 명령어 |
 | `--limit <N>` | 결과 개수 제한 | search |
-| `--all` | 전체 결과 (페이지네이션) | confluence search |
-| `--stream` | JSONL 스트리밍 | confluence search (--all 필요) |
+| `--all` | 전체 결과 (페이지네이션) | jira search, confluence search |
+| `--stream` | JSONL 스트리밍 | jira search, confluence search (--all 필요) |
 | `--expand` | 추가 확장 필드 (ancestors 등, body.storage는 기본 포함) | confluence search |
 | `--format` | 출력 형식 (html, markdown) | jira get/search, confluence search/get/comments |
 | `--fields` | 필드 지정 | jira search, jira get |
