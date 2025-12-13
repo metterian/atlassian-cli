@@ -82,63 +82,26 @@ pub fn text_to_adf(text: &str) -> Value {
     })
 }
 
-/// Processes ADF input for any text field (description, comment, etc.)
-///
-/// This is the core processing function that handles conversion and validation
-/// of various input types to ADF format. All field-specific functions delegate
-/// to this function.
-///
-/// Handles three input types:
-/// - String: Converts to simple paragraph ADF using text_to_adf
-/// - Object: Validates as ADF and returns it (zero-copy via move semantics)
-/// - Null: Returns empty paragraph ADF
-///
-/// # Arguments
-/// * `value` - The input value to process (consumed)
-/// * `field_name` - Name of the field for error messages (e.g., "description", "comment")
-///
-/// # Errors
-/// Returns error if:
-/// - Input is not string, object, or null (e.g., number, boolean, array)
-/// - Object fails ADF validation
-///
-/// # Examples
-/// ```
-/// use serde_json::{json, Value};
-/// use anyhow::Result;
-///
-/// fn process_adf_input(value: Value, field_name: &str) -> Result<Value> {
-///     match value {
-///         Value::String(text) => Ok(json!({
-///             "type": "doc", "version": 1,
-///             "content": [{"type": "paragraph", "content": [{"type": "text", "text": text}]}]
-///         })),
-///         Value::Object(_) => Ok(value),
-///         Value::Null => Ok(json!({"type": "doc", "version": 1, "content": []})),
-///         _ => anyhow::bail!("{} must be string or ADF object", field_name)
-///     }
-/// }
-///
-/// let adf = process_adf_input(json!("Hello"), "description").unwrap();
-/// assert_eq!(adf["type"], "doc");
-/// ```
 pub fn process_adf_input(value: Value, field_name: &str) -> Result<Value> {
     match value {
         Value::String(text) => {
-            // Plain text: convert to simple ADF
+            let trimmed = text.trim();
+            if trimmed.starts_with('{')
+                && trimmed.ends_with('}')
+                && let Ok(parsed) = serde_json::from_str::<Value>(trimmed)
+                && parsed.is_object()
+            {
+                validate_adf(&parsed)?;
+                return Ok(parsed);
+            }
             Ok(text_to_adf(&text))
         }
         Value::Object(_) => {
-            // ADF object: validate and return (zero-copy via move)
             validate_adf(&value)?;
             Ok(value)
         }
-        Value::Null => {
-            // Null/missing: return empty paragraph ADF
-            Ok(text_to_adf(""))
-        }
+        Value::Null => Ok(text_to_adf("")),
         _ => {
-            // Invalid type (number, boolean, array, etc.)
             anyhow::bail!(
                 "{} must be string or ADF object, got {:?}",
                 field_name,
@@ -406,6 +369,51 @@ mod tests {
         assert_eq!(result["type"], "doc");
         assert_eq!(result["content"][0]["type"], "heading");
         assert_eq!(result["content"][0]["attrs"]["level"], 2);
+    }
+
+    #[test]
+    fn test_process_adf_input_json_string() {
+        let adf_json = r#"{"type":"doc","version":1,"content":[{"type":"paragraph","content":[{"type":"text","text":"Hello"}]}]}"#;
+        let input = json!(adf_json);
+        let result = process_adf_input(input, "test_field").unwrap();
+
+        assert_eq!(result["type"], "doc");
+        assert_eq!(result["content"][0]["content"][0]["text"], "Hello");
+    }
+
+    #[test]
+    fn test_process_adf_input_json_string_with_whitespace() {
+        let adf_json = r#"  {"type":"doc","version":1,"content":[]}  "#;
+        let input = json!(adf_json);
+        let result = process_adf_input(input, "test_field").unwrap();
+
+        assert_eq!(result["type"], "doc");
+    }
+
+    #[test]
+    fn test_process_adf_input_invalid_json_string() {
+        let input = json!("{not valid json}");
+        let result = process_adf_input(input, "test_field").unwrap();
+
+        assert_eq!(result["type"], "doc");
+        assert_eq!(
+            result["content"][0]["content"][0]["text"],
+            "{not valid json}"
+        );
+    }
+
+    #[test]
+    fn test_process_adf_input_json_string_not_adf() {
+        let input = json!(r#"{"foo":"bar"}"#);
+        let result = process_adf_input(input, "test_field");
+
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("missing required field 'type'")
+        );
     }
 
     #[test]

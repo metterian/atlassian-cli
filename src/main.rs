@@ -9,16 +9,6 @@ pub enum OutputFormat {
     Markdown,
 }
 
-/// Parse string input that may be either plain text or ADF JSON.
-/// If the string is valid JSON object, return it as Value::Object (for ADF).
-/// Otherwise, return it as Value::String (plain text to be converted to ADF later).
-fn parse_text_or_adf(s: String) -> serde_json::Value {
-    match serde_json::from_str::<serde_json::Value>(&s) {
-        Ok(v) if v.is_object() => v,
-        _ => serde_json::Value::String(s),
-    }
-}
-
 #[derive(Parser)]
 #[command(name = "atlassian-cli", version, about = "CLI for Atlassian Jira and Confluence", long_about = None)]
 struct Cli {
@@ -454,7 +444,7 @@ async fn handle_jira(
             description,
         } => {
             let desc = description
-                .map(parse_text_or_adf)
+                .map(serde_json::Value::String)
                 .unwrap_or(serde_json::Value::Null);
             jira::create_issue(&project, &summary, &issue_type, desc, config).await
         }
@@ -464,14 +454,20 @@ async fn handle_jira(
         }
         JiraSubcommand::Comment { action } => match action {
             CommentAction::Add { issue_key, text } => {
-                jira::add_comment(&issue_key, parse_text_or_adf(text), config).await
+                jira::add_comment(&issue_key, serde_json::Value::String(text), config).await
             }
             CommentAction::Update {
                 issue_key,
                 comment_id,
                 text,
             } => {
-                jira::update_comment(&issue_key, &comment_id, parse_text_or_adf(text), config).await
+                jira::update_comment(
+                    &issue_key,
+                    &comment_id,
+                    serde_json::Value::String(text),
+                    config,
+                )
+                .await
             }
         },
         JiraSubcommand::Transition {
