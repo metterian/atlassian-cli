@@ -28,8 +28,16 @@ atlassian-cli jira search "project = PROJ" --all --stream > issues.jsonl
 atlassian-cli jira create PROJ "Summary" Bug --description "Plain text"
 atlassian-cli jira update PROJ-123 '{"summary": "New title", "description": "Plain text"}'
 
-# Comments & Transitions
+# Comments
+atlassian-cli jira comment list PROJ-123 --format markdown
 atlassian-cli jira comment add PROJ-123 "Comment text"
+atlassian-cli jira comment update PROJ-123 <comment_id> "Updated text"
+
+# Attachments
+atlassian-cli jira attachment list PROJ-123
+atlassian-cli jira attachment download <attachment_id> -o ./output.png
+
+# Transitions
 atlassian-cli jira transitions PROJ-123
 atlassian-cli jira transition PROJ-123 31
 ```
@@ -49,6 +57,17 @@ Marks: `{"type": "text", "text": "bold", "marks": [{"type": "strong"}]}`
 - `strong`, `em`, `code`, `strike`, `link` (with `attrs.href`)
 
 List hierarchy: `bulletList` → `listItem` → `paragraph` → `text`
+
+### Jira Options
+
+| Option | Description | Applies To |
+|--------|-------------|------------|
+| `--format markdown` | Convert ADF to Markdown | get, search, comment list |
+| `--fields` | Specify fields to return | search |
+| `--limit N` | Results per page (default: 100) | search |
+| `--all` | Fetch all results via token pagination | search |
+| `--stream` | Output JSONL (requires --all) | search |
+| `-o, --output` | Output file path | attachment download |
 
 ## Confluence
 

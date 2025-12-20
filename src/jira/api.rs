@@ -7,6 +7,7 @@ use crate::markdown::adf_to_markdown;
 use anyhow::Result;
 use serde_json::{Value, json};
 use std::io::{self, Write};
+use std::path::Path;
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -343,6 +344,50 @@ pub async fn update_issue(
     Ok(json!({}))
 }
 
+pub async fn get_comments(issue_key: &str, as_markdown: bool, config: &Config) -> Result<Value> {
+    let client = http::client(config);
+    let url = format!(
+        "{}/rest/api/3/issue/{}/comment",
+        config.base_url(),
+        issue_key
+    );
+
+    let response = client
+        .get(&url)
+        .header("Authorization", http::auth_header(config))
+        .header("Accept", "application/json")
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!("Failed to get comments ({}): {}", status, body);
+    }
+
+    let data: Value = response.json().await?;
+    let comments = data["comments"].as_array().cloned().unwrap_or_default();
+
+    let processed_comments: Vec<Value> = comments
+        .into_iter()
+        .map(|mut comment| {
+            if as_markdown {
+                if let Some(body) = comment.get_mut("body") {
+                    if body.is_object() {
+                        *body = Value::String(adf_to_markdown(body));
+                    }
+                }
+            }
+            comment
+        })
+        .collect();
+
+    Ok(json!({
+        "comments": processed_comments,
+        "total": processed_comments.len()
+    }))
+}
+
 pub async fn add_comment(issue_key: &str, comment: Value, config: &Config) -> Result<Value> {
     let comment_adf = adf::process_comment_input(comment)?;
 
@@ -477,6 +522,104 @@ pub async fn get_transitions(issue_key: &str, config: &Config) -> Result<Value> 
     let mut data: Value = response.json().await?;
     filter::apply(&mut data, config);
     Ok(data["transitions"].take())
+}
+
+pub async fn get_attachments(issue_key: &str, config: &Config) -> Result<Value> {
+    let client = http::client(config);
+    let url = format!(
+        "{}/rest/api/3/issue/{}?fields=attachment",
+        config.base_url(),
+        issue_key
+    );
+
+    let response = client
+        .get(&url)
+        .header("Authorization", http::auth_header(config))
+        .header("Accept", "application/json")
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!("Failed to get attachments ({}): {}", status, body);
+    }
+
+    let data: Value = response.json().await?;
+    let attachments = data["fields"]["attachment"].clone();
+
+    if attachments.is_null() {
+        return Ok(json!([]));
+    }
+
+    Ok(attachments)
+}
+
+pub async fn download_attachment(
+    attachment_id: &str,
+    output_path: Option<&Path>,
+    config: &Config,
+) -> Result<Value> {
+    let client = http::client(config);
+
+    // First, get attachment metadata to get the content URL and filename
+    let meta_url = format!(
+        "{}/rest/api/3/attachment/{}",
+        config.base_url(),
+        attachment_id
+    );
+
+    let meta_response = client
+        .get(&meta_url)
+        .header("Authorization", http::auth_header(config))
+        .header("Accept", "application/json")
+        .send()
+        .await?;
+
+    if !meta_response.status().is_success() {
+        let status = meta_response.status();
+        let body = meta_response.text().await.unwrap_or_default();
+        anyhow::bail!("Failed to get attachment metadata ({}): {}", status, body);
+    }
+
+    let metadata: Value = meta_response.json().await?;
+    let content_url = metadata["content"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("No content URL in attachment metadata"))?;
+    let filename = metadata["filename"]
+        .as_str()
+        .unwrap_or("attachment");
+
+    // Download the actual file content
+    let content_response = client
+        .get(content_url)
+        .header("Authorization", http::auth_header(config))
+        .send()
+        .await?;
+
+    if !content_response.status().is_success() {
+        let status = content_response.status();
+        let body = content_response.text().await.unwrap_or_default();
+        anyhow::bail!("Failed to download attachment ({}): {}", status, body);
+    }
+
+    let bytes = content_response.bytes().await?;
+
+    // Determine output path
+    let final_path = match output_path {
+        Some(p) => p.to_path_buf(),
+        None => std::env::current_dir()?.join(filename),
+    };
+
+    // Write to file
+    std::fs::write(&final_path, &bytes)?;
+
+    Ok(json!({
+        "filename": filename,
+        "path": final_path.to_string_lossy(),
+        "size": bytes.len(),
+        "id": attachment_id
+    }))
 }
 
 #[cfg(test)]
