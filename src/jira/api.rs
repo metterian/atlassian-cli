@@ -78,6 +78,46 @@ fn apply_project_filter(jql: &str, config: &Config) -> String {
     }
 }
 
+fn extract_display_name(value: &Value) -> Value {
+    value
+        .get("displayName")
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+fn simplify_issue(data: &Value, as_markdown: bool) -> Value {
+    let fields = &data["fields"];
+
+    let description = if as_markdown {
+        fields
+            .get("description")
+            .map(|d| {
+                if d.is_object() {
+                    Value::String(adf_to_markdown(d))
+                } else {
+                    d.clone()
+                }
+            })
+            .unwrap_or(Value::Null)
+    } else {
+        fields.get("description").cloned().unwrap_or(Value::Null)
+    };
+
+    json!({
+        "key": data.get("key").cloned().unwrap_or(Value::Null),
+        "summary": fields.get("summary").cloned().unwrap_or(Value::Null),
+        "type": fields.get("issuetype").and_then(|t| t.get("name")).cloned().unwrap_or(Value::Null),
+        "status": fields.get("status").and_then(|s| s.get("name")).cloned().unwrap_or(Value::Null),
+        "priority": fields.get("priority").and_then(|p| p.get("name")).cloned().unwrap_or(Value::Null),
+        "assignee": fields.get("assignee").map(extract_display_name).unwrap_or(Value::Null),
+        "reporter": fields.get("reporter").map(extract_display_name).unwrap_or(Value::Null),
+        "project": fields.get("project").and_then(|p| p.get("name")).cloned().unwrap_or(Value::Null),
+        "created": fields.get("created").cloned().unwrap_or(Value::Null),
+        "updated": fields.get("updated").cloned().unwrap_or(Value::Null),
+        "description": description,
+    })
+}
+
 pub async fn get_issue(issue_key: &str, as_markdown: bool, config: &Config) -> Result<Value> {
     let client = http::client(config);
     let base_url = format!("{}/rest/api/3/issue/{}", config.base_url(), issue_key);
@@ -97,20 +137,18 @@ pub async fn get_issue(issue_key: &str, as_markdown: bool, config: &Config) -> R
         anyhow::bail!("Failed to get issue ({}): {}", status, body);
     }
 
-    let mut data: Value = response.json().await?;
+    let data: Value = response.json().await?;
 
-    if as_markdown {
-        convert_issue_to_markdown(&mut data);
-    }
+    // Simplify issue structure
+    let mut simplified = simplify_issue(&data, as_markdown);
 
-    // Fetch and include comments
+    // Fetch and include comments at the end
     let comments = fetch_comments_for_issue(issue_key, as_markdown, config).await;
-    if let Some(obj) = data.as_object_mut() {
+    if let Some(obj) = simplified.as_object_mut() {
         obj.insert("comments".to_string(), json!(comments));
     }
 
-    filter::apply(&mut data, config);
-    Ok(data)
+    Ok(simplified)
 }
 
 pub async fn search(
