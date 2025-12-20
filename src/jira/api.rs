@@ -103,6 +103,12 @@ pub async fn get_issue(issue_key: &str, as_markdown: bool, config: &Config) -> R
         convert_issue_to_markdown(&mut data);
     }
 
+    // Fetch and include comments
+    let comments = fetch_comments_for_issue(issue_key, as_markdown, config).await;
+    if let Some(obj) = data.as_object_mut() {
+        obj.insert("comments".to_string(), json!(comments));
+    }
+
     filter::apply(&mut data, config);
     Ok(data)
 }
@@ -344,6 +350,31 @@ pub async fn update_issue(
     Ok(json!({}))
 }
 
+fn simplify_comment(comment: &Value, as_markdown: bool) -> Value {
+    let body = if as_markdown {
+        comment
+            .get("body")
+            .map(|b| {
+                if b.is_object() {
+                    Value::String(adf_to_markdown(b))
+                } else {
+                    b.clone()
+                }
+            })
+            .unwrap_or(Value::Null)
+    } else {
+        comment.get("body").cloned().unwrap_or(Value::Null)
+    };
+
+    json!({
+        "id": comment.get("id").cloned().unwrap_or(Value::Null),
+        "author": comment.get("author").and_then(|a| a.get("displayName")).cloned().unwrap_or(Value::Null),
+        "body": body,
+        "created": comment.get("created").cloned().unwrap_or(Value::Null),
+        "updated": comment.get("updated").cloned().unwrap_or(Value::Null)
+    })
+}
+
 pub async fn get_comments(issue_key: &str, as_markdown: bool, config: &Config) -> Result<Value> {
     let client = http::client(config);
     let url = format!(
@@ -369,23 +400,51 @@ pub async fn get_comments(issue_key: &str, as_markdown: bool, config: &Config) -
     let comments = data["comments"].as_array().cloned().unwrap_or_default();
 
     let processed_comments: Vec<Value> = comments
-        .into_iter()
-        .map(|mut comment| {
-            if as_markdown {
-                if let Some(body) = comment.get_mut("body") {
-                    if body.is_object() {
-                        *body = Value::String(adf_to_markdown(body));
-                    }
-                }
-            }
-            comment
-        })
+        .iter()
+        .map(|comment| simplify_comment(comment, as_markdown))
         .collect();
 
     Ok(json!({
         "comments": processed_comments,
         "total": processed_comments.len()
     }))
+}
+
+async fn fetch_comments_for_issue(issue_key: &str, as_markdown: bool, config: &Config) -> Vec<Value> {
+    let client = http::client(config);
+    let url = format!(
+        "{}/rest/api/3/issue/{}/comment",
+        config.base_url(),
+        issue_key
+    );
+
+    let response = match client
+        .get(&url)
+        .header("Authorization", http::auth_header(config))
+        .header("Accept", "application/json")
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(_) => return vec![],
+    };
+
+    if !response.status().is_success() {
+        return vec![];
+    }
+
+    let data: Value = match response.json().await {
+        Ok(d) => d,
+        Err(_) => return vec![],
+    };
+
+    data["comments"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|comment| simplify_comment(comment, as_markdown))
+        .collect()
 }
 
 pub async fn add_comment(issue_key: &str, comment: Value, config: &Config) -> Result<Value> {
