@@ -118,11 +118,24 @@ fn simplify_issue(data: &Value, as_markdown: bool) -> Value {
     })
 }
 
+fn simplify_attachment(attachment: &Value) -> Value {
+    json!({
+        "id": attachment.get("id").cloned().unwrap_or(Value::Null),
+        "filename": attachment.get("filename").cloned().unwrap_or(Value::Null),
+        "mimeType": attachment.get("mimeType").cloned().unwrap_or(Value::Null),
+        "size": attachment.get("size").cloned().unwrap_or(Value::Null),
+        "content": attachment.get("content").cloned().unwrap_or(Value::Null),
+    })
+}
+
 pub async fn get_issue(issue_key: &str, as_markdown: bool, config: &Config) -> Result<Value> {
     let client = http::client(config);
-    let base_url = format!("{}/rest/api/3/issue/{}", config.base_url(), issue_key);
-
-    let url = fields::apply_field_filtering_to_url(&base_url);
+    // Include attachment field
+    let url = format!(
+        "{}/rest/api/3/issue/{}?fields=summary,description,status,priority,issuetype,assignee,reporter,project,created,updated,attachment",
+        config.base_url(),
+        issue_key
+    );
 
     let response = client
         .get(&url)
@@ -141,6 +154,21 @@ pub async fn get_issue(issue_key: &str, as_markdown: bool, config: &Config) -> R
 
     // Simplify issue structure
     let mut simplified = simplify_issue(&data, as_markdown);
+
+    // Add attachments
+    let attachments: Vec<Value> = data["fields"]["attachment"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(simplify_attachment)
+        .collect();
+
+    if let Some(obj) = simplified.as_object_mut() {
+        if !attachments.is_empty() {
+            obj.insert("attachments".to_string(), json!(attachments));
+        }
+    }
 
     // Fetch and include comments at the end
     let comments = fetch_comments_for_issue(issue_key, as_markdown, config).await;
