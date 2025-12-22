@@ -3,7 +3,7 @@ set -e
 
 BINARY_NAME="atlassian-cli"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
-REPO="junyeong-ai/atlassian-cli"
+REPO="metterian/atlassian-cli"
 SKILL_NAME="jira-confluence"
 PROJECT_SKILL_DIR=".claude/skills/$SKILL_NAME"
 USER_SKILL_DIR="$HOME/.claude/skills/$SKILL_NAME"
@@ -123,8 +123,8 @@ backup_skill() {
 install_skill() {
     echo "📋 Installing skill to $USER_SKILL_DIR"
     mkdir -p "$(dirname "$USER_SKILL_DIR")"
-    cp -r "$PROJECT_SKILL_DIR" "$USER_SKILL_DIR"
-    echo "   ✅ Skill installed"
+    ln -sf "$(pwd)/$PROJECT_SKILL_DIR" "$USER_SKILL_DIR"
+    echo "   ✅ Skill installed (symlink → $(pwd)/$PROJECT_SKILL_DIR)"
 }
 
 prompt_skill_installation() {

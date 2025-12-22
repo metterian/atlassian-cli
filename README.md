@@ -1,9 +1,9 @@
 # Atlassian CLI
 
-[![CI](https://github.com/junyeong-ai/atlassian-cli/workflows/CI/badge.svg)](https://github.com/junyeong-ai/atlassian-cli/actions)
-[![Lint](https://github.com/junyeong-ai/atlassian-cli/workflows/Lint/badge.svg)](https://github.com/junyeong-ai/atlassian-cli/actions)
+[![CI](https://github.com/metterian/atlassian-cli/workflows/CI/badge.svg)](https://github.com/metterian/atlassian-cli/actions)
+[![Lint](https://github.com/metterian/atlassian-cli/workflows/Lint/badge.svg)](https://github.com/metterian/atlassian-cli/actions)
 [![Rust](https://img.shields.io/badge/rust-1.91.1%2B%20(2024%20edition)-orange?style=flat-square&logo=rust)](https://www.rust-lang.org)
-[![Version](https://img.shields.io/badge/version-0.1.0-blue?style=flat-square)](https://github.com/junyeong-ai/atlassian-cli/releases)
+[![Version](https://img.shields.io/badge/version-0.1.0-blue?style=flat-square)](https://github.com/metterian/atlassian-cli/releases)
 
 > **🌐 한국어** | **[English](README.en.md)**
 
@@ -23,7 +23,7 @@
 
 ```bash
 # 1. 설치
-curl -fsSL https://raw.githubusercontent.com/junyeong-ai/atlassian-cli/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/metterian/atlassian-cli/main/scripts/install.sh | bash
 
 # 2. 설정 초기화
 atlassian-cli config init --global
@@ -109,11 +109,11 @@ atlassian-cli jira get PROJ-123 | jq -r '.fields.summary'
 
 **자동 설치**:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/junyeong-ai/atlassian-cli/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/metterian/atlassian-cli/main/scripts/install.sh | bash
 ```
 
 **수동 설치**:
-1. [Releases](https://github.com/junyeong-ai/atlassian-cli/releases)에서 바이너리 다운로드
+1. [Releases](https://github.com/metterian/atlassian-cli/releases)에서 바이너리 다운로드
 2. 압축 해제: `tar -xzf atlassian-cli-*.tar.gz`
 3. PATH에 이동: `mv atlassian-cli ~/.local/bin/`
 
@@ -125,7 +125,7 @@ curl -fsSL https://raw.githubusercontent.com/junyeong-ai/atlassian-cli/main/scri
 ### 방법 2: 소스 빌드
 
 ```bash
-git clone https://github.com/junyeong-ai/atlassian-cli
+git clone https://github.com/metterian/atlassian-cli
 cd atlassian-cli
 cargo build --release
 cp target/release/atlassian-cli ~/.local/bin/
@@ -317,7 +317,7 @@ JIRA_SEARCH_DEFAULT_FIELDS="key,summary" atlassian-cli jira search "project = PR
 
 ## 💬 지원
 
-- **GitHub Issues**: [문제 신고](https://github.com/junyeong-ai/atlassian-cli/issues)
+- **GitHub Issues**: [문제 신고](https://github.com/metterian/atlassian-cli/issues)
 - **개발자 문서**: [CLAUDE.md](CLAUDE.md)
 
 ---
