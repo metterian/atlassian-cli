@@ -85,6 +85,34 @@ fn extract_display_name(value: &Value) -> Value {
         .unwrap_or(Value::Null)
 }
 
+/// Inject attachment IDs into [Media: filename] references
+/// Transforms "[Media: image.png]" to "[Media: image.png (id:12345)]"
+fn inject_attachment_ids(text: &str, attachments: &[Value]) -> String {
+    use regex::Regex;
+
+    let re = Regex::new(r"\[Media: ([^\]]+)\]").unwrap();
+
+    re.replace_all(text, |caps: &regex::Captures| {
+        let filename = &caps[1];
+
+        // Find matching attachment by filename
+        for attachment in attachments {
+            if let (Some(att_filename), Some(att_id)) = (
+                attachment.get("filename").and_then(|f| f.as_str()),
+                attachment.get("id").and_then(|i| i.as_str()),
+            ) {
+                if att_filename == filename {
+                    return format!("[Media: {} (id:{})]", filename, att_id);
+                }
+            }
+        }
+
+        // No match found, return original
+        caps[0].to_string()
+    })
+    .to_string()
+}
+
 fn simplify_issue(data: &Value, as_markdown: bool) -> Value {
     let fields = &data["fields"];
 
@@ -152,10 +180,7 @@ pub async fn get_issue(issue_key: &str, as_markdown: bool, config: &Config) -> R
 
     let data: Value = response.json().await?;
 
-    // Simplify issue structure
-    let mut simplified = simplify_issue(&data, as_markdown);
-
-    // Add attachments
+    // Extract attachments first (needed for ID injection)
     let attachments: Vec<Value> = data["fields"]["attachment"]
         .as_array()
         .cloned()
@@ -164,6 +189,20 @@ pub async fn get_issue(issue_key: &str, as_markdown: bool, config: &Config) -> R
         .map(simplify_attachment)
         .collect();
 
+    // Simplify issue structure
+    let mut simplified = simplify_issue(&data, as_markdown);
+
+    // Inject attachment IDs into description [Media: filename] references
+    if as_markdown {
+        if let Some(obj) = simplified.as_object_mut() {
+            if let Some(Value::String(desc)) = obj.get("description") {
+                let desc_with_ids = inject_attachment_ids(desc, &attachments);
+                obj.insert("description".to_string(), Value::String(desc_with_ids));
+            }
+        }
+    }
+
+    // Add attachments to output
     if let Some(obj) = simplified.as_object_mut() {
         if !attachments.is_empty() {
             obj.insert("attachments".to_string(), json!(attachments));
@@ -171,7 +210,20 @@ pub async fn get_issue(issue_key: &str, as_markdown: bool, config: &Config) -> R
     }
 
     // Fetch and include comments at the end
-    let comments = fetch_comments_for_issue(issue_key, as_markdown, config).await;
+    let mut comments = fetch_comments_for_issue(issue_key, as_markdown, config).await;
+
+    // Inject attachment IDs into comment bodies
+    if as_markdown {
+        for comment in &mut comments {
+            if let Some(Value::String(body)) = comment.get("body") {
+                let body_with_ids = inject_attachment_ids(body, &attachments);
+                if let Some(obj) = comment.as_object_mut() {
+                    obj.insert("body".to_string(), Value::String(body_with_ids));
+                }
+            }
+        }
+    }
+
     if let Some(obj) = simplified.as_object_mut() {
         obj.insert("comments".to_string(), json!(comments));
     }
@@ -1229,5 +1281,74 @@ mod tests {
             base_url,
             "https://test.atlassian.net/rest/api/3/issue/PROJ-123/transitions"
         );
+    }
+
+    // inject_attachment_ids tests
+    #[test]
+    fn test_inject_attachment_ids_single_match() {
+        let attachments = vec![json!({
+            "id": "12345",
+            "filename": "screenshot.png"
+        })];
+
+        let text = "Check this [Media: screenshot.png] for details";
+        let result = inject_attachment_ids(text, &attachments);
+
+        assert_eq!(
+            result,
+            "Check this [Media: screenshot.png (id:12345)] for details"
+        );
+    }
+
+    #[test]
+    fn test_inject_attachment_ids_multiple_matches() {
+        let attachments = vec![
+            json!({"id": "111", "filename": "image1.png"}),
+            json!({"id": "222", "filename": "image2.jpg"}),
+        ];
+
+        let text = "[Media: image1.png] and [Media: image2.jpg]";
+        let result = inject_attachment_ids(text, &attachments);
+
+        assert_eq!(
+            result,
+            "[Media: image1.png (id:111)] and [Media: image2.jpg (id:222)]"
+        );
+    }
+
+    #[test]
+    fn test_inject_attachment_ids_no_match() {
+        let attachments = vec![json!({
+            "id": "12345",
+            "filename": "other.png"
+        })];
+
+        let text = "[Media: unknown.png]";
+        let result = inject_attachment_ids(text, &attachments);
+
+        assert_eq!(result, "[Media: unknown.png]");
+    }
+
+    #[test]
+    fn test_inject_attachment_ids_empty_attachments() {
+        let attachments: Vec<Value> = vec![];
+
+        let text = "[Media: image.png]";
+        let result = inject_attachment_ids(text, &attachments);
+
+        assert_eq!(result, "[Media: image.png]");
+    }
+
+    #[test]
+    fn test_inject_attachment_ids_no_media_refs() {
+        let attachments = vec![json!({
+            "id": "12345",
+            "filename": "image.png"
+        })];
+
+        let text = "Plain text without media references";
+        let result = inject_attachment_ids(text, &attachments);
+
+        assert_eq!(result, "Plain text without media references");
     }
 }

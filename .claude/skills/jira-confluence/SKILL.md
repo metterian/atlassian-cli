@@ -37,6 +37,16 @@ atlassian-cli jira comment update PROJ-123 <comment_id> "Updated text"
 atlassian-cli jira attachment list PROJ-123
 atlassian-cli jira attachment download <attachment_id> -o ./output.png
 
+## Viewing Images in Comments/Description
+
+When `--format markdown` is used, media references include attachment IDs:
+`[Media: screenshot.png (id:12345)]`
+
+To analyze an image:
+1. Note the attachment ID from `[Media: filename (id:xxx)]`
+2. Download: `atlassian-cli jira attachment download <id> -o /tmp/filename`
+3. View the downloaded image using the Read tool
+
 # Transitions
 atlassian-cli jira transitions PROJ-123
 atlassian-cli jira transition PROJ-123 31
