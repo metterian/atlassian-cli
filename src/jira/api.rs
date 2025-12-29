@@ -799,6 +799,60 @@ pub async fn download_attachment(
     }))
 }
 
+pub async fn search_users(query: &str, limit: u32, config: &Config) -> Result<Value> {
+    let client = http::client(config);
+    let encoded_query: String = query
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '~' {
+                c.to_string()
+            } else {
+                format!("%{:02X}", c as u8)
+            }
+        })
+        .collect();
+    let url = format!(
+        "{}/rest/api/3/user/search?query={}&maxResults={}",
+        config.base_url(),
+        encoded_query,
+        limit
+    );
+
+    let response = client
+        .get(&url)
+        .header("Authorization", http::auth_header(config))
+        .header("Accept", "application/json")
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!("User search failed ({}): {}", status, body);
+    }
+
+    let data: Value = response.json().await?;
+    let users: Vec<Value> = data
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|user| {
+            json!({
+                "accountId": user.get("accountId").cloned().unwrap_or(Value::Null),
+                "displayName": user.get("displayName").cloned().unwrap_or(Value::Null),
+                "emailAddress": user.get("emailAddress").cloned().unwrap_or(Value::Null),
+                "active": user.get("active").cloned().unwrap_or(Value::Null),
+            })
+        })
+        .collect();
+
+    Ok(json!({
+        "users": users,
+        "count": users.len()
+    }))
+}
+
 #[cfg(test)]
 #[allow(
     clippy::field_reassign_with_default,

@@ -128,6 +128,13 @@ enum JiraSubcommand {
         #[arg(long, short, help = "Output file path")]
         output: Option<PathBuf>,
     },
+    /// Search for users by name or email
+    #[command(name = "user-search")]
+    UserSearch {
+        query: String,
+        #[arg(long, default_value = "50", help = "Max results to return")]
+        limit: u32,
+    },
 }
 
 #[derive(Parser)]
@@ -501,6 +508,9 @@ async fn handle_jira(
             attachment_id,
             output,
         } => jira::download_attachment(&attachment_id, output.as_deref(), config).await,
+        JiraSubcommand::UserSearch { query, limit } => {
+            jira::search_users(&query, limit, config).await
+        }
     }
 }
 

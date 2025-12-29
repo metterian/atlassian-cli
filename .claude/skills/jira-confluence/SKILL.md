@@ -50,6 +50,10 @@ To analyze an image:
 # Transitions
 atlassian-cli jira transitions PROJ-123
 atlassian-cli jira transition PROJ-123 31
+
+# User Search (find people by name or email)
+atlassian-cli jira user-search "john"
+atlassian-cli jira user-search "john.doe@example.com" --limit 10
 ```
 
 ### ADF Format (for rich text)
@@ -74,10 +78,14 @@ List hierarchy: `bulletList` → `listItem` → `paragraph` → `text`
 |--------|-------------|------------|
 | `--format markdown` | Convert ADF to Markdown | get, search, comment list |
 | `--fields` | Specify fields to return | search |
-| `--limit N` | Results per page (default: 100) | search |
+| `--limit N` | Results per page (default: 100) | search, user-search |
 | `--all` | Fetch all results via token pagination | search |
 | `--stream` | Output JSONL (requires --all) | search |
 | `-o, --output` | Output file path | attachment download |
+
+### User Search Output
+Returns users with `accountId`, `displayName`, `emailAddress`, and `active` status.
+Use `accountId` for JQL queries like `assignee = "<accountId>"`.
 
 ## Confluence
 
