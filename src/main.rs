@@ -91,9 +91,24 @@ enum JiraSubcommand {
         issue_key: String,
         fields: String,
     },
-    Comment {
-        #[command(subcommand)]
-        action: CommentAction,
+    /// List comments for an issue
+    Comments {
+        issue_key: String,
+        #[arg(long, value_enum, default_value = "html", help = "ADF content format")]
+        format: OutputFormat,
+    },
+    /// Add a comment to an issue
+    #[command(name = "comment-add")]
+    CommentAdd {
+        issue_key: String,
+        text: String,
+    },
+    /// Update a comment
+    #[command(name = "comment-update")]
+    CommentUpdate {
+        issue_key: String,
+        comment_id: String,
+        text: String,
     },
     Transition {
         issue_key: String,
@@ -102,39 +117,13 @@ enum JiraSubcommand {
     Transitions {
         issue_key: String,
     },
-    Attachment {
-        #[command(subcommand)]
-        action: AttachmentAction,
-    },
-}
-
-#[derive(Subcommand)]
-enum CommentAction {
-    /// List comments for an issue
-    List {
-        issue_key: String,
-        #[arg(long, value_enum, default_value = "html", help = "ADF content format")]
-        format: OutputFormat,
-    },
-    Add {
-        issue_key: String,
-        text: String,
-    },
-    Update {
-        issue_key: String,
-        comment_id: String,
-        text: String,
-    },
-}
-
-#[derive(Subcommand)]
-enum AttachmentAction {
     /// List attachments for an issue
-    List {
+    Attachments {
         issue_key: String,
     },
     /// Download an attachment by ID
-    Download {
+    #[command(name = "attachment-download")]
+    AttachmentDownload {
         attachment_id: String,
         #[arg(long, short, help = "Output file path")]
         output: Option<PathBuf>,
@@ -486,22 +475,18 @@ async fn handle_jira(
             let fields_value: serde_json::Value = serde_json::from_str(&fields)?;
             jira::update_issue(&issue_key, fields_value, config).await
         }
-        JiraSubcommand::Comment { action } => match action {
-            CommentAction::List { issue_key, format } => {
-                let as_markdown = matches!(format, OutputFormat::Markdown);
-                jira::get_comments(&issue_key, as_markdown, config).await
-            }
-            CommentAction::Add { issue_key, text } => {
-                jira::add_comment(&issue_key, parse_text_or_adf(text), config).await
-            }
-            CommentAction::Update {
-                issue_key,
-                comment_id,
-                text,
-            } => {
-                jira::update_comment(&issue_key, &comment_id, parse_text_or_adf(text), config).await
-            }
-        },
+        JiraSubcommand::Comments { issue_key, format } => {
+            let as_markdown = matches!(format, OutputFormat::Markdown);
+            jira::get_comments(&issue_key, as_markdown, config).await
+        }
+        JiraSubcommand::CommentAdd { issue_key, text } => {
+            jira::add_comment(&issue_key, parse_text_or_adf(text), config).await
+        }
+        JiraSubcommand::CommentUpdate {
+            issue_key,
+            comment_id,
+            text,
+        } => jira::update_comment(&issue_key, &comment_id, parse_text_or_adf(text), config).await,
         JiraSubcommand::Transition {
             issue_key,
             transition_id,
@@ -509,17 +494,13 @@ async fn handle_jira(
         JiraSubcommand::Transitions { issue_key } => {
             jira::get_transitions(&issue_key, config).await
         }
-        JiraSubcommand::Attachment { action } => match action {
-            AttachmentAction::List { issue_key } => {
-                jira::get_attachments(&issue_key, config).await
-            }
-            AttachmentAction::Download {
-                attachment_id,
-                output,
-            } => {
-                jira::download_attachment(&attachment_id, output.as_deref(), config).await
-            }
-        },
+        JiraSubcommand::Attachments { issue_key } => {
+            jira::get_attachments(&issue_key, config).await
+        }
+        JiraSubcommand::AttachmentDownload {
+            attachment_id,
+            output,
+        } => jira::download_attachment(&attachment_id, output.as_deref(), config).await,
     }
 }
 

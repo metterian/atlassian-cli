@@ -1,6 +1,6 @@
 ---
 name: jira-confluence
-description: Execute Jira/Confluence queries via atlassian-cli. Search issues with JQL, manage pages with CQL, create/update tickets, handle comments and transitions, work with ADF format. Use when working with Jira tickets, Confluence pages, sprint planning, issue tracking, or Atlassian workspace queries.
+description: Execute Jira/Confluence queries via atlassian-cli. All commands use flat structure (e.g., `jira comments`, `jira comment-add`). Support JQL/CQL searches with ADF-to-Markdown conversion, create/update tickets and pages, manage comments and attachments, handle issue transitions.
 allowed-tools: Bash
 ---
 
@@ -29,13 +29,13 @@ atlassian-cli jira create PROJ "Summary" Bug --description "Plain text"
 atlassian-cli jira update PROJ-123 '{"summary": "New title", "description": "Plain text"}'
 
 # Comments
-atlassian-cli jira comment list PROJ-123 --format markdown
-atlassian-cli jira comment add PROJ-123 "Comment text"
-atlassian-cli jira comment update PROJ-123 <comment_id> "Updated text"
+atlassian-cli jira comments PROJ-123 --format markdown
+atlassian-cli jira comment-add PROJ-123 "Comment text"
+atlassian-cli jira comment-update PROJ-123 <comment_id> "Updated text"
 
 # Attachments
-atlassian-cli jira attachment list PROJ-123
-atlassian-cli jira attachment download <attachment_id> -o ./output.png
+atlassian-cli jira attachments PROJ-123
+atlassian-cli jira attachment-download <attachment_id> -o ./output.png
 
 ## Viewing Images in Comments/Description
 
