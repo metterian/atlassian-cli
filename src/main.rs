@@ -62,11 +62,13 @@ struct JiraCommand {
 
 #[derive(Subcommand)]
 enum JiraSubcommand {
+    #[command(alias = "view", alias = "show")]
     Get {
         issue_key: String,
         #[arg(long, value_enum, default_value = "html", help = "ADF content format")]
         format: OutputFormat,
     },
+    #[command(alias = "list", alias = "ls", alias = "find")]
     Search {
         jql: String,
         #[arg(long, default_value = "100", help = "Results per page")]
@@ -81,9 +83,15 @@ enum JiraSubcommand {
         format: OutputFormat,
     },
     Create {
-        project: String,
-        summary: String,
-        issue_type: String,
+        project: Option<String>,
+        summary: Option<String>,
+        issue_type: Option<String>,
+        #[arg(long = "project", short = 'p')]
+        project_flag: Option<String>,
+        #[arg(long = "summary", alias = "title")]
+        summary_flag: Option<String>,
+        #[arg(long = "type", short = 't', alias = "issue-type")]
+        type_flag: Option<String>,
         #[arg(long)]
         description: Option<String>,
     },
@@ -92,6 +100,7 @@ enum JiraSubcommand {
         fields: String,
     },
     /// List comments for an issue
+    #[command(alias = "comment")]
     Comments {
         issue_key: String,
         #[arg(long, value_enum, default_value = "html", help = "ADF content format")]
@@ -110,10 +119,14 @@ enum JiraSubcommand {
         comment_id: String,
         text: String,
     },
+    #[command(alias = "move", alias = "trans")]
     Transition {
         issue_key: String,
-        transition_id: String,
+        transition_id: Option<String>,
+        #[arg(long = "transition-id", alias = "to")]
+        transition_id_flag: Option<String>,
     },
+    #[command(alias = "statuses")]
     Transitions {
         issue_key: String,
     },
@@ -471,12 +484,24 @@ async fn handle_jira(
             project,
             summary,
             issue_type,
+            project_flag,
+            summary_flag,
+            type_flag,
             description,
         } => {
+            let proj = project
+                .or(project_flag)
+                .ok_or_else(|| anyhow::anyhow!("project required (positional or -p/--project)"))?;
+            let summ = summary
+                .or(summary_flag)
+                .ok_or_else(|| anyhow::anyhow!("summary required (positional or --summary)"))?;
+            let itype = issue_type
+                .or(type_flag)
+                .ok_or_else(|| anyhow::anyhow!("issue type required (positional or -t/--type)"))?;
             let desc = description
                 .map(parse_text_or_adf)
                 .unwrap_or(serde_json::Value::Null);
-            jira::create_issue(&project, &summary, &issue_type, desc, config).await
+            jira::create_issue(&proj, &summ, &itype, desc, config).await
         }
         JiraSubcommand::Update { issue_key, fields } => {
             let fields_value: serde_json::Value = serde_json::from_str(&fields)?;
@@ -497,7 +522,13 @@ async fn handle_jira(
         JiraSubcommand::Transition {
             issue_key,
             transition_id,
-        } => jira::transition_issue(&issue_key, &transition_id, config).await,
+            transition_id_flag,
+        } => {
+            let tid = transition_id
+                .or(transition_id_flag)
+                .ok_or_else(|| anyhow::anyhow!("transition ID required (positional or --transition-id)"))?;
+            jira::transition_issue(&issue_key, &tid, config).await
+        }
         JiraSubcommand::Transitions { issue_key } => {
             jira::get_transitions(&issue_key, config).await
         }

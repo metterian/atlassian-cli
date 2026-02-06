@@ -6,10 +6,37 @@ allowed-tools: Bash
 
 # atlassian-cli
 
+## URL Handling
+
+When user provides a URL instead of ID, extract the identifier:
+
+**Jira URLs:**
+- `https://domain/browse/PROJ-123` → Issue Key: `PROJ-123`
+- `https://domain/jira/browse/PROJ-123` → Issue Key: `PROJ-123`
+
+**Confluence URLs:**
+- `https://domain/wiki/spaces/SPACE/pages/12345/Title` → Page ID: `12345`
+- `https://domain/wiki/pages/viewpage.action?pageId=12345` → Page ID: `12345`
+
+Extract the ID/key and use with the appropriate command.
+
 ## Jira
 
 **Reading**: `--format markdown` converts ADF to Markdown (recommended)
 **Writing**: Plain text auto-converts to ADF. For rich text, use ADF JSON.
+
+### Command Aliases
+| Canonical | Aliases |
+|-----------|---------|
+| `get` | `view`, `show` |
+| `search` | `list`, `ls`, `find` |
+| `transition` | `move`, `trans` |
+| `transitions` | `statuses` |
+| `comments` | `comment` |
+
+### Flag Shortcuts
+- `--transition-id <id>` (alias: `--to`): alternative to positional transition ID
+- `-p/--project`, `--summary/--title`, `-t/--type`: alternative to positional args for `create`
 
 ### Commands
 ```bash
@@ -44,7 +71,7 @@ When `--format markdown` is used, media references include attachment IDs:
 
 To analyze an image:
 1. Note the attachment ID from `[Media: filename (id:xxx)]`
-2. Download: `atlassian-cli jira attachment download <id> -o /tmp/filename`
+2. Download: `atlassian-cli jira attachment download <id> -o /tmp/filename
 3. View the downloaded image using the Read tool
 
 # Transitions
