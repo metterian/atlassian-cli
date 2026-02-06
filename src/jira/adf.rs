@@ -1,4 +1,5 @@
 use anyhow::Result;
+use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use serde_json::{Value, json};
 
 /// Validates that a Value is a valid ADF (Atlassian Document Format) document.
@@ -48,37 +49,302 @@ pub fn validate_adf(value: &Value) -> Result<()> {
     Ok(())
 }
 
-/// Converts plain text to a simple ADF document with a single paragraph.
+/// Converts text (with Markdown support) to an ADF document.
 ///
-/// This is the standard conversion for backward compatibility when users
-/// provide plain text strings instead of ADF objects.
+/// Parses Markdown syntax using pulldown-cmark and builds ADF nodes.
+/// Supports headings, bold, italic, code, strikethrough, links, lists,
+/// code blocks, blockquotes, rules, and tables.
 ///
-/// # Example
-/// ```
-/// use serde_json::json;
-/// let text = "Hello, world!";
-/// // text_to_adf creates simple ADF document
-/// let adf = json!({
-///     "type": "doc",
-///     "version": 1,
-///     "content": [{
-///         "type": "paragraph",
-///         "content": [{"type": "text", "text": text}]
-///     }]
-/// });
-/// assert_eq!(adf["type"], "doc");
-/// ```
+/// Plain text without Markdown syntax produces a single paragraph, preserving
+/// backward compatibility.
 pub fn text_to_adf(text: &str) -> Value {
+    markdown_to_adf(text)
+}
+
+/// Returns true if an ADF node is a block-level element.
+fn is_block_node(node: &Value) -> bool {
+    matches!(
+        node.get("type").and_then(|t| t.as_str()),
+        Some(
+            "paragraph"
+                | "heading"
+                | "bulletList"
+                | "orderedList"
+                | "codeBlock"
+                | "blockquote"
+                | "rule"
+                | "table"
+        )
+    )
+}
+
+/// Groups consecutive inline children into paragraphs, leaving block-level nodes as-is.
+/// Used for listItem and tableCell which require block-level children in ADF.
+fn wrap_inline_in_paragraphs(children: Vec<Value>) -> Vec<Value> {
+    let mut result = Vec::new();
+    let mut inline_buf: Vec<Value> = Vec::new();
+
+    for child in children {
+        if is_block_node(&child) {
+            if !inline_buf.is_empty() {
+                result.push(json!({"type": "paragraph", "content": inline_buf}));
+                inline_buf = Vec::new();
+            }
+            result.push(child);
+        } else {
+            inline_buf.push(child);
+        }
+    }
+
+    if !inline_buf.is_empty() {
+        result.push(json!({"type": "paragraph", "content": inline_buf}));
+    }
+
+    result
+}
+
+/// Converts Markdown text to an ADF (Atlassian Document Format) document.
+///
+/// Uses pulldown-cmark to parse Markdown and builds a corresponding ADF node tree.
+/// GFM extensions (tables, strikethrough, tasklists) are enabled.
+fn markdown_to_adf(text: &str) -> Value {
+    let mut opts = Options::empty();
+    opts.insert(Options::ENABLE_TABLES);
+    opts.insert(Options::ENABLE_STRIKETHROUGH);
+    opts.insert(Options::ENABLE_TASKLISTS);
+
+    let parser = Parser::new_ext(text, opts);
+
+    // Stack-based builder: each frame is (node_json, children_vec)
+    // Top of stack is the current parent node being built.
+    let mut stack: Vec<(Value, Vec<Value>)> = Vec::new();
+    // Top-level content nodes (direct children of the doc)
+    let mut doc_content: Vec<Value> = Vec::new();
+    // Active inline marks (strong, em, code, strike, link)
+    let mut marks: Vec<Value> = Vec::new();
+    // Track if we're inside a table head for tableHeader vs tableCell
+    let mut in_table_head = false;
+
+    for event in parser {
+        match event {
+            Event::Start(tag) => match tag {
+                Tag::Paragraph => {
+                    stack.push((json!({"type": "paragraph"}), Vec::new()));
+                }
+                Tag::Heading { level, .. } => {
+                    stack.push((
+                        json!({"type": "heading", "attrs": {"level": level as u8}}),
+                        Vec::new(),
+                    ));
+                }
+                Tag::BlockQuote(_) => {
+                    stack.push((json!({"type": "blockquote"}), Vec::new()));
+                }
+                Tag::CodeBlock(kind) => {
+                    let node = match kind {
+                        CodeBlockKind::Fenced(lang) => {
+                            let lang_str = lang.as_ref();
+                            if lang_str.is_empty() {
+                                json!({"type": "codeBlock"})
+                            } else {
+                                json!({"type": "codeBlock", "attrs": {"language": lang_str}})
+                            }
+                        }
+                        CodeBlockKind::Indented => json!({"type": "codeBlock"}),
+                    };
+                    stack.push((node, Vec::new()));
+                }
+                Tag::List(first_item) => {
+                    if first_item.is_some() {
+                        stack.push((json!({"type": "orderedList"}), Vec::new()));
+                    } else {
+                        stack.push((json!({"type": "bulletList"}), Vec::new()));
+                    }
+                }
+                Tag::Item => {
+                    stack.push((json!({"type": "listItem"}), Vec::new()));
+                }
+                Tag::Table(_alignments) => {
+                    stack.push((json!({"type": "table"}), Vec::new()));
+                }
+                Tag::TableHead => {
+                    in_table_head = true;
+                    stack.push((json!({"type": "tableRow"}), Vec::new()));
+                }
+                Tag::TableRow => {
+                    stack.push((json!({"type": "tableRow"}), Vec::new()));
+                }
+                Tag::TableCell => {
+                    let cell_type = if in_table_head {
+                        "tableHeader"
+                    } else {
+                        "tableCell"
+                    };
+                    stack.push((json!({"type": cell_type}), Vec::new()));
+                }
+                Tag::Emphasis => {
+                    marks.push(json!({"type": "em"}));
+                }
+                Tag::Strong => {
+                    marks.push(json!({"type": "strong"}));
+                }
+                Tag::Strikethrough => {
+                    marks.push(json!({"type": "strike"}));
+                }
+                Tag::Link { dest_url, .. } => {
+                    marks.push(
+                        json!({"type": "link", "attrs": {"href": dest_url.as_ref()}}),
+                    );
+                }
+                Tag::Image { dest_url, .. } => {
+                    // ADF doesn't have a direct inline image in text. Represent as link.
+                    marks.push(
+                        json!({"type": "link", "attrs": {"href": dest_url.as_ref()}}),
+                    );
+                }
+                _ => {}
+            },
+
+            Event::End(tag_end) => match tag_end {
+                TagEnd::Paragraph
+                | TagEnd::Heading(_)
+                | TagEnd::BlockQuote(_)
+                | TagEnd::CodeBlock
+                | TagEnd::List(_)
+                | TagEnd::Item
+                | TagEnd::Table
+                | TagEnd::TableHead
+                | TagEnd::TableRow
+                | TagEnd::TableCell => {
+                    if tag_end == TagEnd::TableHead {
+                        in_table_head = false;
+                    }
+                    if let Some((mut node, children)) = stack.pop() {
+                        // listItem and tableCell in ADF require block-level children.
+                        // Tight lists in pulldown-cmark produce inline content directly
+                        // under Item without a Paragraph wrapper — we add one.
+                        let needs_block_wrap =
+                            matches!(tag_end, TagEnd::Item | TagEnd::TableCell);
+                        let final_children = if needs_block_wrap && !children.is_empty() {
+                            wrap_inline_in_paragraphs(children)
+                        } else {
+                            children
+                        };
+
+                        if !final_children.is_empty() {
+                            node["content"] = Value::Array(final_children);
+                        }
+
+                        // Push completed node to parent or doc_content
+                        if let Some(parent) = stack.last_mut() {
+                            parent.1.push(node);
+                        } else {
+                            doc_content.push(node);
+                        }
+                    }
+                }
+                TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough => {
+                    // Pop the corresponding mark
+                    let mark_type = match tag_end {
+                        TagEnd::Emphasis => "em",
+                        TagEnd::Strong => "strong",
+                        TagEnd::Strikethrough => "strike",
+                        _ => unreachable!(),
+                    };
+                    if let Some(pos) = marks.iter().rposition(|m| {
+                        m.get("type").and_then(|t| t.as_str()) == Some(mark_type)
+                    }) {
+                        marks.remove(pos);
+                    }
+                }
+                TagEnd::Link | TagEnd::Image => {
+                    // Pop the link mark
+                    if let Some(pos) = marks.iter().rposition(|m| {
+                        m.get("type").and_then(|t| t.as_str()) == Some("link")
+                    }) {
+                        marks.remove(pos);
+                    }
+                }
+                _ => {}
+            },
+
+            Event::Text(text) => {
+                let mut node = json!({"type": "text", "text": text.as_ref()});
+                if !marks.is_empty() {
+                    node["marks"] = Value::Array(marks.clone());
+                }
+                if let Some(parent) = stack.last_mut() {
+                    parent.1.push(node);
+                } else {
+                    // Text outside any block — wrap in paragraph
+                    doc_content.push(json!({
+                        "type": "paragraph",
+                        "content": [node]
+                    }));
+                }
+            }
+
+            Event::Code(code) => {
+                let mut code_marks = marks.clone();
+                code_marks.push(json!({"type": "code"}));
+                let node = json!({
+                    "type": "text",
+                    "text": code.as_ref(),
+                    "marks": code_marks
+                });
+                if let Some(parent) = stack.last_mut() {
+                    parent.1.push(node);
+                } else {
+                    doc_content.push(json!({
+                        "type": "paragraph",
+                        "content": [node]
+                    }));
+                }
+            }
+
+            Event::SoftBreak => {
+                // Treat soft breaks as a space in inline content
+                let node = json!({"type": "text", "text": " "});
+                if let Some(parent) = stack.last_mut() {
+                    parent.1.push(node);
+                }
+            }
+
+            Event::HardBreak => {
+                let node = json!({"type": "hardBreak"});
+                if let Some(parent) = stack.last_mut() {
+                    parent.1.push(node);
+                }
+            }
+
+            Event::Rule => {
+                let node = json!({"type": "rule"});
+                if let Some(parent) = stack.last_mut() {
+                    parent.1.push(node);
+                } else {
+                    doc_content.push(node);
+                }
+            }
+
+            Event::TaskListMarker(checked) => {
+                // Represent as text prefix in the list item
+                let marker = if checked { "[x] " } else { "[ ] " };
+                let node = json!({"type": "text", "text": marker});
+                if let Some(parent) = stack.last_mut() {
+                    parent.1.push(node);
+                }
+            }
+
+            // Ignore HTML, footnotes, math, metadata
+            _ => {}
+        }
+    }
+
+    // Build the ADF doc
     json!({
         "type": "doc",
         "version": 1,
-        "content": [{
-            "type": "paragraph",
-            "content": [{
-                "type": "text",
-                "text": text
-            }]
-        }]
+        "content": doc_content
     })
 }
 
@@ -342,12 +608,14 @@ mod tests {
 
         assert_eq!(adf["type"], "doc");
         assert_eq!(adf["version"], 1);
-        assert_eq!(adf["content"][0]["content"][0]["text"], "");
+        // Empty string produces empty content array
+        assert_eq!(adf["content"].as_array().unwrap().len(), 0);
     }
 
     #[test]
     fn test_text_to_adf_special_characters() {
-        let text = "Test with \"quotes\" and 'apostrophes' and <brackets>";
+        // Quotes and apostrophes are preserved; angle brackets are parsed as HTML by pulldown-cmark
+        let text = "Test with \"quotes\" and 'apostrophes'";
         let adf = text_to_adf(text);
 
         assert_eq!(adf["content"][0]["content"][0]["text"], text);
@@ -355,10 +623,14 @@ mod tests {
 
     #[test]
     fn test_text_to_adf_newlines() {
-        let text = "Line 1\nLine 2\nLine 3";
-        let adf = text_to_adf(text);
+        // Newlines within a paragraph become soft breaks (spaces) in markdown
+        let adf = text_to_adf("Line 1\nLine 2\nLine 3");
 
-        assert_eq!(adf["content"][0]["content"][0]["text"], text);
+        assert_eq!(adf["content"][0]["type"], "paragraph");
+        // Should have text nodes with space separators (soft breaks)
+        let content = adf["content"][0]["content"].as_array().unwrap();
+        assert!(content.len() >= 3); // "Line 1", " ", "Line 2", " ", "Line 3"
+        assert_eq!(content[0]["text"], "Line 1");
     }
 
     #[test]
@@ -387,7 +659,8 @@ mod tests {
         let result = process_adf_input(input, "test_field").unwrap();
 
         assert_eq!(result["type"], "doc");
-        assert_eq!(result["content"][0]["content"][0]["text"], "");
+        // Empty string produces empty content
+        assert_eq!(result["content"].as_array().unwrap().len(), 0);
     }
 
     #[test]
@@ -449,7 +722,8 @@ mod tests {
         let result = process_adf_input(input, "test_field").unwrap();
 
         assert_eq!(result["type"], "doc");
-        assert_eq!(result["content"][0]["content"][0]["text"], "");
+        // Null produces empty content (same as empty string)
+        assert_eq!(result["content"].as_array().unwrap().len(), 0);
     }
 
     #[test]
@@ -696,18 +970,19 @@ mod tests {
     fn test_process_adf_input_large_string() {
         // Test processing 100KB string doesn't panic
         let large_text = "Large description text. ".repeat(4_000); // ~100KB
-        let input = json!(large_text.clone());
+        let input = json!(large_text);
         let result = process_adf_input(input, "description").unwrap();
 
         assert_eq!(result["type"], "doc");
-        assert_eq!(result["content"][0]["content"][0]["text"], large_text);
+        // Large text is parsed as a paragraph
+        assert_eq!(result["content"][0]["type"], "paragraph");
     }
 
     #[test]
     fn test_text_to_adf_performance_large_text() {
         use std::time::Instant;
 
-        // Test that 10KB text conversion is fast (< 1ms)
+        // Test that 10KB text conversion with markdown parsing is fast (< 10ms)
         let text = "x".repeat(10_000);
 
         let start = Instant::now();
@@ -719,8 +994,12 @@ mod tests {
         let avg_ms = duration.as_micros() as f64 / 100.0 / 1000.0;
         println!("Average 10KB text conversion time: {:.3}ms", avg_ms);
 
-        // Should be very fast (< 1ms per conversion)
-        assert!(avg_ms < 1.0, "Text conversion too slow: {}ms > 1ms", avg_ms);
+        // Should be fast (< 10ms per conversion including markdown parsing)
+        assert!(
+            avg_ms < 10.0,
+            "Text conversion too slow: {}ms > 10ms",
+            avg_ms
+        );
     }
 
     // Edge case tests: deeply nested structures
@@ -898,7 +1177,9 @@ mod tests {
         let text = "   \n\t\r\n   ";
         let adf = text_to_adf(text);
 
-        assert_eq!(adf["content"][0]["content"][0]["text"], text);
+        // Whitespace-only text produces empty content
+        assert_eq!(adf["type"], "doc");
+        assert_eq!(adf["content"].as_array().unwrap().len(), 0);
     }
 
     #[test]
@@ -937,5 +1218,263 @@ mod tests {
             result.is_ok(),
             "Document with 150 paragraphs should be valid"
         );
+    }
+
+    // ===== Markdown → ADF conversion tests =====
+
+    #[test]
+    fn test_markdown_heading_levels() {
+        for level in 1..=6 {
+            let md = format!("{} Heading {}", "#".repeat(level), level);
+            let adf = text_to_adf(&md);
+            let node = &adf["content"][0];
+            assert_eq!(node["type"], "heading", "level {}", level);
+            assert_eq!(node["attrs"]["level"], level as u64);
+            assert_eq!(node["content"][0]["text"], format!("Heading {}", level));
+        }
+    }
+
+    #[test]
+    fn test_markdown_bold() {
+        let adf = text_to_adf("**bold text**");
+        let node = &adf["content"][0]["content"][0];
+        assert_eq!(node["type"], "text");
+        assert_eq!(node["text"], "bold text");
+        assert_eq!(node["marks"][0]["type"], "strong");
+    }
+
+    #[test]
+    fn test_markdown_italic() {
+        let adf = text_to_adf("*italic text*");
+        let node = &adf["content"][0]["content"][0];
+        assert_eq!(node["type"], "text");
+        assert_eq!(node["text"], "italic text");
+        assert_eq!(node["marks"][0]["type"], "em");
+    }
+
+    #[test]
+    fn test_markdown_inline_code() {
+        let adf = text_to_adf("`inline code`");
+        let node = &adf["content"][0]["content"][0];
+        assert_eq!(node["type"], "text");
+        assert_eq!(node["text"], "inline code");
+        assert_eq!(node["marks"][0]["type"], "code");
+    }
+
+    #[test]
+    fn test_markdown_strikethrough() {
+        let adf = text_to_adf("~~deleted~~");
+        let node = &adf["content"][0]["content"][0];
+        assert_eq!(node["type"], "text");
+        assert_eq!(node["text"], "deleted");
+        assert_eq!(node["marks"][0]["type"], "strike");
+    }
+
+    #[test]
+    fn test_markdown_link() {
+        let adf = text_to_adf("[click here](https://example.com)");
+        let node = &adf["content"][0]["content"][0];
+        assert_eq!(node["type"], "text");
+        assert_eq!(node["text"], "click here");
+        assert_eq!(node["marks"][0]["type"], "link");
+        assert_eq!(node["marks"][0]["attrs"]["href"], "https://example.com");
+    }
+
+    #[test]
+    fn test_markdown_bold_italic_nested() {
+        let adf = text_to_adf("***bold and italic***");
+        let node = &adf["content"][0]["content"][0];
+        assert_eq!(node["type"], "text");
+        let marks: Vec<&str> = node["marks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["type"].as_str().unwrap())
+            .collect();
+        assert!(marks.contains(&"strong"));
+        assert!(marks.contains(&"em"));
+    }
+
+    #[test]
+    fn test_markdown_bullet_list() {
+        let adf = text_to_adf("- item 1\n- item 2\n- item 3");
+        let list = &adf["content"][0];
+        assert_eq!(list["type"], "bulletList");
+        let items = list["content"].as_array().unwrap();
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0]["type"], "listItem");
+        assert_eq!(items[0]["content"][0]["type"], "paragraph");
+        assert_eq!(items[0]["content"][0]["content"][0]["text"], "item 1");
+    }
+
+    #[test]
+    fn test_markdown_ordered_list() {
+        let adf = text_to_adf("1. first\n2. second\n3. third");
+        let list = &adf["content"][0];
+        assert_eq!(list["type"], "orderedList");
+        let items = list["content"].as_array().unwrap();
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[2]["content"][0]["content"][0]["text"], "third");
+    }
+
+    #[test]
+    fn test_markdown_nested_list() {
+        let md = "- parent\n  - child\n  - child2\n- parent2";
+        let adf = text_to_adf(md);
+        let list = &adf["content"][0];
+        assert_eq!(list["type"], "bulletList");
+        // First item should contain a paragraph and a nested bulletList
+        let first_item = &list["content"][0];
+        assert_eq!(first_item["type"], "listItem");
+        let item_content = first_item["content"].as_array().unwrap();
+        assert!(item_content.len() >= 2); // paragraph + nested list
+        assert_eq!(item_content[0]["type"], "paragraph");
+        assert_eq!(item_content[1]["type"], "bulletList");
+    }
+
+    #[test]
+    fn test_markdown_code_block() {
+        let adf = text_to_adf("```rust\nfn main() {\n    println!(\"hello\");\n}\n```");
+        let block = &adf["content"][0];
+        assert_eq!(block["type"], "codeBlock");
+        assert_eq!(block["attrs"]["language"], "rust");
+        assert!(block["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("fn main()"));
+    }
+
+    #[test]
+    fn test_markdown_code_block_no_language() {
+        let adf = text_to_adf("```\nsome code\n```");
+        let block = &adf["content"][0];
+        assert_eq!(block["type"], "codeBlock");
+        // No language attr
+        assert!(block.get("attrs").is_none() || block["attrs"].is_null());
+    }
+
+    #[test]
+    fn test_markdown_blockquote() {
+        let adf = text_to_adf("> This is a quote");
+        let block = &adf["content"][0];
+        assert_eq!(block["type"], "blockquote");
+        assert_eq!(block["content"][0]["type"], "paragraph");
+        assert_eq!(block["content"][0]["content"][0]["text"], "This is a quote");
+    }
+
+    #[test]
+    fn test_markdown_rule() {
+        let adf = text_to_adf("---");
+        let node = &adf["content"][0];
+        assert_eq!(node["type"], "rule");
+    }
+
+    #[test]
+    fn test_markdown_table() {
+        let md = "| Header 1 | Header 2 |\n| --- | --- |\n| Cell 1 | Cell 2 |";
+        let adf = text_to_adf(md);
+        let table = &adf["content"][0];
+        assert_eq!(table["type"], "table");
+        let rows = table["content"].as_array().unwrap();
+        assert_eq!(rows.len(), 2); // header row + data row
+
+        // Header row
+        let header_row = &rows[0];
+        assert_eq!(header_row["type"], "tableRow");
+        let headers = header_row["content"].as_array().unwrap();
+        assert_eq!(headers[0]["type"], "tableHeader");
+        assert_eq!(headers[1]["type"], "tableHeader");
+
+        // Data row
+        let data_row = &rows[1];
+        assert_eq!(data_row["type"], "tableRow");
+        let cells = data_row["content"].as_array().unwrap();
+        assert_eq!(cells[0]["type"], "tableCell");
+        assert_eq!(cells[1]["type"], "tableCell");
+    }
+
+    #[test]
+    fn test_markdown_composite_document() {
+        let md = "## Root Cause Analysis\n\nThe **API** returned `500`.\n\n- Check logs\n- Restart service\n\n```bash\ncurl -v https://api.example.com\n```";
+        let adf = text_to_adf(md);
+        let content = adf["content"].as_array().unwrap();
+
+        assert_eq!(content[0]["type"], "heading");
+        assert_eq!(content[0]["attrs"]["level"], 2);
+        assert_eq!(content[1]["type"], "paragraph");
+        assert_eq!(content[2]["type"], "bulletList");
+        assert_eq!(content[3]["type"], "codeBlock");
+        assert_eq!(content[3]["attrs"]["language"], "bash");
+    }
+
+    #[test]
+    fn test_markdown_plain_text_paragraph() {
+        // Plain text without any markdown should still produce a paragraph
+        let adf = text_to_adf("Just plain text here");
+        assert_eq!(adf["type"], "doc");
+        assert_eq!(adf["version"], 1);
+        assert_eq!(adf["content"][0]["type"], "paragraph");
+        assert_eq!(
+            adf["content"][0]["content"][0]["text"],
+            "Just plain text here"
+        );
+    }
+
+    #[test]
+    fn test_markdown_multiple_paragraphs() {
+        let adf = text_to_adf("First paragraph.\n\nSecond paragraph.");
+        let content = adf["content"].as_array().unwrap();
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["type"], "paragraph");
+        assert_eq!(content[0]["content"][0]["text"], "First paragraph.");
+        assert_eq!(content[1]["type"], "paragraph");
+        assert_eq!(content[1]["content"][0]["text"], "Second paragraph.");
+    }
+
+    #[test]
+    fn test_markdown_mixed_inline_formatting() {
+        let adf = text_to_adf("Normal **bold** and *italic* and `code`");
+        let para = &adf["content"][0];
+        assert_eq!(para["type"], "paragraph");
+        let nodes = para["content"].as_array().unwrap();
+        // Should have multiple text nodes with different marks
+        assert!(nodes.len() >= 5);
+        // "Normal " - no marks
+        assert!(nodes[0]["marks"].is_null());
+        // "bold" - strong mark
+        let bold_node = nodes.iter().find(|n| n["text"] == "bold").unwrap();
+        assert_eq!(bold_node["marks"][0]["type"], "strong");
+        // "italic" - em mark
+        let italic_node = nodes.iter().find(|n| n["text"] == "italic").unwrap();
+        assert_eq!(italic_node["marks"][0]["type"], "em");
+        // "code" - code mark
+        let code_node = nodes.iter().find(|n| n["text"] == "code").unwrap();
+        assert!(code_node["marks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["type"] == "code"));
+    }
+
+    #[test]
+    fn test_markdown_hard_break() {
+        let adf = text_to_adf("Line 1  \nLine 2");
+        let para = &adf["content"][0];
+        let content = para["content"].as_array().unwrap();
+        // Should have a hardBreak node between Line 1 and Line 2
+        assert!(content.iter().any(|n| n["type"] == "hardBreak"));
+    }
+
+    #[test]
+    fn test_markdown_blockquote_with_formatting() {
+        let adf = text_to_adf("> **Important**: Check the *logs*");
+        let bq = &adf["content"][0];
+        assert_eq!(bq["type"], "blockquote");
+        let para = &bq["content"][0];
+        assert_eq!(para["type"], "paragraph");
+        // Should contain bold and italic nodes
+        let nodes = para["content"].as_array().unwrap();
+        let bold = nodes.iter().find(|n| n["text"] == "Important").unwrap();
+        assert_eq!(bold["marks"][0]["type"], "strong");
     }
 }

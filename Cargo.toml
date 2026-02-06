@@ -33,6 +33,7 @@ tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 base64 = "0.22.1"
 htmd = "0.5"
 regex = "1.11"
+pulldown-cmark = { version = "0.13", default-features = false, features = ["simd"] }
 
 [profile.release]
 opt-level = 3

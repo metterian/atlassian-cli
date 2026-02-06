@@ -156,11 +156,38 @@ fn simplify_attachment(attachment: &Value) -> Value {
     })
 }
 
+fn simplify_issuelink(link: &Value) -> Value {
+    let link_type = link.get("type").and_then(|t| t.get("name")).cloned().unwrap_or(Value::Null);
+
+    // Check if it's an inward or outward link
+    if let Some(inward) = link.get("inwardIssue") {
+        let direction = link.get("type").and_then(|t| t.get("inward")).cloned().unwrap_or(Value::Null);
+        json!({
+            "type": link_type,
+            "direction": direction,
+            "key": inward.get("key").cloned().unwrap_or(Value::Null),
+            "summary": inward.get("fields").and_then(|f| f.get("summary")).cloned().unwrap_or(Value::Null),
+            "status": inward.get("fields").and_then(|f| f.get("status")).and_then(|s| s.get("name")).cloned().unwrap_or(Value::Null),
+        })
+    } else if let Some(outward) = link.get("outwardIssue") {
+        let direction = link.get("type").and_then(|t| t.get("outward")).cloned().unwrap_or(Value::Null);
+        json!({
+            "type": link_type,
+            "direction": direction,
+            "key": outward.get("key").cloned().unwrap_or(Value::Null),
+            "summary": outward.get("fields").and_then(|f| f.get("summary")).cloned().unwrap_or(Value::Null),
+            "status": outward.get("fields").and_then(|f| f.get("status")).and_then(|s| s.get("name")).cloned().unwrap_or(Value::Null),
+        })
+    } else {
+        json!({})
+    }
+}
+
 pub async fn get_issue(issue_key: &str, as_markdown: bool, config: &Config) -> Result<Value> {
     let client = http::client(config);
-    // Include attachment field
+    // Include attachment and issuelinks fields
     let url = format!(
-        "{}/rest/api/3/issue/{}?fields=summary,description,status,priority,issuetype,assignee,reporter,project,created,updated,attachment",
+        "{}/rest/api/3/issue/{}?fields=summary,description,status,priority,issuetype,assignee,reporter,project,created,updated,attachment,issuelinks",
         config.base_url(),
         issue_key
     );
@@ -206,6 +233,22 @@ pub async fn get_issue(issue_key: &str, as_markdown: bool, config: &Config) -> R
     if let Some(obj) = simplified.as_object_mut() {
         if !attachments.is_empty() {
             obj.insert("attachments".to_string(), json!(attachments));
+        }
+    }
+
+    // Extract and add issuelinks
+    let issuelinks: Vec<Value> = data["fields"]["issuelinks"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(simplify_issuelink)
+        .filter(|link| !link.as_object().map(|o| o.is_empty()).unwrap_or(true))
+        .collect();
+
+    if let Some(obj) = simplified.as_object_mut() {
+        if !issuelinks.is_empty() {
+            obj.insert("issuelinks".to_string(), json!(issuelinks));
         }
     }
 
@@ -1243,7 +1286,8 @@ mod tests {
         assert!(comment_result.is_ok());
         let comment_adf = comment_result.unwrap();
         assert_eq!(comment_adf["type"], "doc");
-        assert_eq!(comment_adf["content"][0]["content"][0]["text"], "");
+        // Null/empty input produces empty content array (markdown parser)
+        assert_eq!(comment_adf["content"].as_array().unwrap().len(), 0);
     }
 
     #[test]
