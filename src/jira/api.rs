@@ -85,9 +85,9 @@ fn extract_display_name(value: &Value) -> Value {
         .unwrap_or(Value::Null)
 }
 
-/// Inject attachment IDs into [Media: filename] references
-/// Transforms "[Media: image.png]" to "[Media: image.png (id:12345)]"
-fn inject_attachment_ids(text: &str, attachments: &[Value]) -> String {
+/// Inject attachment URLs into [Media: filename] references as markdown image links
+/// Transforms "[Media: image.png]" to "![image.png](content_url)"
+fn inject_media_links(text: &str, attachments: &[Value]) -> String {
     use regex::Regex;
 
     let re = Regex::new(r"\[Media: ([^\]]+)\]").unwrap();
@@ -97,12 +97,12 @@ fn inject_attachment_ids(text: &str, attachments: &[Value]) -> String {
 
         // Find matching attachment by filename
         for attachment in attachments {
-            if let (Some(att_filename), Some(att_id)) = (
+            if let (Some(att_filename), Some(att_content)) = (
                 attachment.get("filename").and_then(|f| f.as_str()),
-                attachment.get("id").and_then(|i| i.as_str()),
+                attachment.get("content").and_then(|c| c.as_str()),
             ) {
                 if att_filename == filename {
-                    return format!("[Media: {} (id:{})]", filename, att_id);
+                    return format!("![{}]({})", filename, att_content);
                 }
             }
         }
@@ -207,7 +207,7 @@ pub async fn get_issue(issue_key: &str, as_markdown: bool, config: &Config) -> R
 
     let data: Value = response.json().await?;
 
-    // Extract attachments first (needed for ID injection)
+    // Extract attachments first (needed for media link injection)
     let attachments: Vec<Value> = data["fields"]["attachment"]
         .as_array()
         .cloned()
@@ -219,11 +219,11 @@ pub async fn get_issue(issue_key: &str, as_markdown: bool, config: &Config) -> R
     // Simplify issue structure
     let mut simplified = simplify_issue(&data, as_markdown);
 
-    // Inject attachment IDs into description [Media: filename] references
+    // Inject media links into description [Media: filename] references
     if as_markdown {
         if let Some(obj) = simplified.as_object_mut() {
             if let Some(Value::String(desc)) = obj.get("description") {
-                let desc_with_ids = inject_attachment_ids(desc, &attachments);
+                let desc_with_ids = inject_media_links(desc, &attachments);
                 obj.insert("description".to_string(), Value::String(desc_with_ids));
             }
         }
@@ -255,11 +255,11 @@ pub async fn get_issue(issue_key: &str, as_markdown: bool, config: &Config) -> R
     // Fetch and include comments at the end
     let mut comments = fetch_comments_for_issue(issue_key, as_markdown, config).await;
 
-    // Inject attachment IDs into comment bodies
+    // Inject media links into comment bodies
     if as_markdown {
         for comment in &mut comments {
             if let Some(Value::String(body)) = comment.get("body") {
-                let body_with_ids = inject_attachment_ids(body, &attachments);
+                let body_with_ids = inject_media_links(body, &attachments);
                 if let Some(obj) = comment.as_object_mut() {
                     obj.insert("body".to_string(), Value::String(body_with_ids));
                 }
@@ -560,15 +560,65 @@ pub async fn get_comments(issue_key: &str, as_markdown: bool, config: &Config) -
     let data: Value = response.json().await?;
     let comments = data["comments"].as_array().cloned().unwrap_or_default();
 
-    let processed_comments: Vec<Value> = comments
+    let mut processed_comments: Vec<Value> = comments
         .iter()
         .map(|comment| simplify_comment(comment, as_markdown))
         .collect();
+
+    // Fetch attachments and inject media links into comment bodies
+    if as_markdown {
+        let attachments = fetch_attachments_for_issue(issue_key, config).await;
+        if !attachments.is_empty() {
+            for comment in &mut processed_comments {
+                if let Some(Value::String(body)) = comment.get("body") {
+                    let body_with_links = inject_media_links(body, &attachments);
+                    if let Some(obj) = comment.as_object_mut() {
+                        obj.insert("body".to_string(), Value::String(body_with_links));
+                    }
+                }
+            }
+        }
+    }
 
     Ok(json!({
         "comments": processed_comments,
         "total": processed_comments.len()
     }))
+}
+
+/// Fetch only the attachment field for an issue (lightweight request for media link injection)
+async fn fetch_attachments_for_issue(issue_key: &str, config: &Config) -> Vec<Value> {
+    let client = http::client(config);
+    let url = format!(
+        "{}/rest/api/3/issue/{}?fields=attachment",
+        config.base_url(),
+        issue_key
+    );
+
+    let response = match client
+        .get(&url)
+        .header("Authorization", http::auth_header(config))
+        .header("Accept", "application/json")
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(_) => return vec![],
+    };
+
+    if !response.status().is_success() {
+        return vec![];
+    }
+
+    let data: Value = match response.json().await {
+        Ok(d) => d,
+        Err(_) => return vec![],
+    };
+
+    data["fields"]["attachment"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
 }
 
 async fn fetch_comments_for_issue(issue_key: &str, as_markdown: bool, config: &Config) -> Vec<Value> {
@@ -1381,72 +1431,88 @@ mod tests {
         );
     }
 
-    // inject_attachment_ids tests
+    // inject_media_links tests
     #[test]
-    fn test_inject_attachment_ids_single_match() {
+    fn test_inject_media_links_single_match() {
         let attachments = vec![json!({
             "id": "12345",
-            "filename": "screenshot.png"
+            "filename": "screenshot.png",
+            "content": "https://test.atlassian.net/rest/api/3/attachment/content/12345"
         })];
 
         let text = "Check this [Media: screenshot.png] for details";
-        let result = inject_attachment_ids(text, &attachments);
+        let result = inject_media_links(text, &attachments);
 
         assert_eq!(
             result,
-            "Check this [Media: screenshot.png (id:12345)] for details"
+            "Check this ![screenshot.png](https://test.atlassian.net/rest/api/3/attachment/content/12345) for details"
         );
     }
 
     #[test]
-    fn test_inject_attachment_ids_multiple_matches() {
+    fn test_inject_media_links_multiple_matches() {
         let attachments = vec![
-            json!({"id": "111", "filename": "image1.png"}),
-            json!({"id": "222", "filename": "image2.jpg"}),
+            json!({"id": "111", "filename": "image1.png", "content": "https://test.atlassian.net/rest/api/3/attachment/content/111"}),
+            json!({"id": "222", "filename": "image2.jpg", "content": "https://test.atlassian.net/rest/api/3/attachment/content/222"}),
         ];
 
         let text = "[Media: image1.png] and [Media: image2.jpg]";
-        let result = inject_attachment_ids(text, &attachments);
+        let result = inject_media_links(text, &attachments);
 
         assert_eq!(
             result,
-            "[Media: image1.png (id:111)] and [Media: image2.jpg (id:222)]"
+            "![image1.png](https://test.atlassian.net/rest/api/3/attachment/content/111) and ![image2.jpg](https://test.atlassian.net/rest/api/3/attachment/content/222)"
         );
     }
 
     #[test]
-    fn test_inject_attachment_ids_no_match() {
+    fn test_inject_media_links_no_match() {
         let attachments = vec![json!({
             "id": "12345",
-            "filename": "other.png"
+            "filename": "other.png",
+            "content": "https://test.atlassian.net/rest/api/3/attachment/content/12345"
         })];
 
         let text = "[Media: unknown.png]";
-        let result = inject_attachment_ids(text, &attachments);
+        let result = inject_media_links(text, &attachments);
 
         assert_eq!(result, "[Media: unknown.png]");
     }
 
     #[test]
-    fn test_inject_attachment_ids_empty_attachments() {
+    fn test_inject_media_links_empty_attachments() {
         let attachments: Vec<Value> = vec![];
 
         let text = "[Media: image.png]";
-        let result = inject_attachment_ids(text, &attachments);
+        let result = inject_media_links(text, &attachments);
 
         assert_eq!(result, "[Media: image.png]");
     }
 
     #[test]
-    fn test_inject_attachment_ids_no_media_refs() {
+    fn test_inject_media_links_no_media_refs() {
         let attachments = vec![json!({
             "id": "12345",
-            "filename": "image.png"
+            "filename": "image.png",
+            "content": "https://test.atlassian.net/rest/api/3/attachment/content/12345"
         })];
 
         let text = "Plain text without media references";
-        let result = inject_attachment_ids(text, &attachments);
+        let result = inject_media_links(text, &attachments);
 
         assert_eq!(result, "Plain text without media references");
+    }
+
+    #[test]
+    fn test_inject_media_links_missing_content_url() {
+        let attachments = vec![json!({
+            "id": "12345",
+            "filename": "screenshot.png"
+        })];
+
+        let text = "[Media: screenshot.png]";
+        let result = inject_media_links(text, &attachments);
+
+        assert_eq!(result, "[Media: screenshot.png]");
     }
 }
