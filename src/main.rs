@@ -68,7 +68,7 @@ enum JiraSubcommand {
         #[arg(long, value_enum, default_value = "html", help = "ADF content format")]
         format: OutputFormat,
     },
-    #[command(alias = "list", alias = "ls", alias = "find")]
+    #[command(alias = "list", alias = "ls", alias = "find", alias = "jql")]
     Search {
         jql: String,
         #[arg(long, default_value = "100", help = "Results per page")]
