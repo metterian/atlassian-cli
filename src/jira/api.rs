@@ -946,6 +946,94 @@ pub async fn search_users(query: &str, limit: u32, config: &Config) -> Result<Va
     }))
 }
 
+pub async fn get_filters(config: &Config) -> Result<Value> {
+    let client = http::client(config);
+    let url = format!("{}/rest/api/3/filter/favourite", config.base_url());
+
+    let response = client
+        .get(&url)
+        .header("Authorization", http::auth_header(config))
+        .header("Accept", "application/json")
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!("Failed to get filters ({}): {}", status, body);
+    }
+
+    let data: Value = response.json().await?;
+    let filters: Vec<Value> = data
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|f| {
+            json!({
+                "id": f.get("id").cloned().unwrap_or(Value::Null),
+                "name": f.get("name").cloned().unwrap_or(Value::Null),
+                "jql": f.get("jql").cloned().unwrap_or(Value::Null),
+                "owner": f.get("owner").and_then(|o| o.get("displayName")).cloned().unwrap_or(Value::Null),
+                "favourite": f.get("favourite").cloned().unwrap_or(Value::Null),
+            })
+        })
+        .collect();
+
+    Ok(json!({
+        "items": filters,
+        "count": filters.len()
+    }))
+}
+
+pub async fn get_filter(filter_id_or_name: &str, config: &Config) -> Result<Value> {
+    // If it looks like a numeric ID, fetch directly
+    if filter_id_or_name.chars().all(|c| c.is_ascii_digit()) {
+        let client = http::client(config);
+        let url = format!(
+            "{}/rest/api/3/filter/{}",
+            config.base_url(),
+            filter_id_or_name
+        );
+
+        let response = client
+            .get(&url)
+            .header("Authorization", http::auth_header(config))
+            .header("Accept", "application/json")
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            anyhow::bail!("Failed to get filter ({}): {}", status, body);
+        }
+
+        let data: Value = response.json().await?;
+        return Ok(data);
+    }
+
+    // Otherwise, search by name in favourite filters
+    let filters_result = get_filters(config).await?;
+    let items = filters_result["items"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("Failed to list filters"))?;
+
+    let name_lower = filter_id_or_name.to_lowercase();
+    for item in items {
+        if let Some(name) = item.get("name").and_then(|n| n.as_str()) {
+            if name.to_lowercase() == name_lower {
+                return Ok(item.clone());
+            }
+        }
+    }
+
+    anyhow::bail!(
+        "Filter '{}' not found in favourite filters",
+        filter_id_or_name
+    )
+}
+
 #[cfg(test)]
 #[allow(
     clippy::field_reassign_with_default,

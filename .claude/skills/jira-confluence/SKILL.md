@@ -1,6 +1,6 @@
 ---
 name: jira-confluence
-description: Execute Jira/Confluence queries via atlassian-cli. All commands use flat structure (e.g., `jira comments`, `jira comment-add`). Support JQL/CQL searches with ADF-to-Markdown conversion, create/update tickets and pages, manage comments and attachments, handle issue transitions.
+description: Execute Jira/Confluence queries via atlassian-cli. All commands use flat structure (e.g., `jira comments`, `jira comment-add`). Support JQL/CQL searches with ADF-to-Markdown conversion, create/update tickets and pages, manage comments and attachments, handle issue transitions, list and run saved filters.
 allowed-tools: Bash
 ---
 
@@ -29,7 +29,8 @@ Extract the ID/key and use with the appropriate command.
 | Canonical | Aliases |
 |-----------|---------|
 | `get` | `view`, `show` |
-| `search` | `list`, `ls`, `find` |
+| `search` | `list`, `ls`, `find`, `jql` |
+| `filters` | `filter` |
 | `transition` | `move`, `trans` |
 | `transitions` | `statuses` |
 | `comments` | `comment` |
@@ -81,6 +82,13 @@ atlassian-cli jira transition PROJ-123 31
 # User Search (find people by name or email)
 atlassian-cli jira user-search "john"
 atlassian-cli jira user-search "john.doe@example.com" --limit 10
+
+# Filters (saved/favourite filters)
+atlassian-cli jira filters                           # list all favourite filters
+atlassian-cli jira filter-run 12345                  # run filter by ID
+atlassian-cli jira filter-run "My Filter" --format markdown  # run filter by name
+atlassian-cli jira filter-run 12345 --all --stream   # paginate all results
+atlassian-cli jira filter-run "Sprint Board" --fields key,summary,status --limit 50
 ```
 
 ### ADF Format (for rich text)
@@ -103,11 +111,11 @@ List hierarchy: `bulletList` → `listItem` → `paragraph` → `text`
 
 | Option | Description | Applies To |
 |--------|-------------|------------|
-| `--format markdown` | Convert ADF to Markdown | get, search, comment list |
-| `--fields` | Specify fields to return | search |
-| `--limit N` | Results per page (default: 100) | search, user-search |
-| `--all` | Fetch all results via token pagination | search |
-| `--stream` | Output JSONL (requires --all) | search |
+| `--format markdown` | Convert ADF to Markdown | get, search, filter-run, comment list |
+| `--fields` | Specify fields to return | search, filter-run |
+| `--limit N` | Results per page (default: 100) | search, filter-run, user-search |
+| `--all` | Fetch all results via token pagination | search, filter-run |
+| `--stream` | Output JSONL (requires --all) | search, filter-run |
 | `-o, --output` | Output file path | attachment download |
 
 ### User Search Output

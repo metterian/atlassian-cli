@@ -148,6 +148,24 @@ enum JiraSubcommand {
         #[arg(long, default_value = "50", help = "Max results to return")]
         limit: u32,
     },
+    /// List favourite/saved filters
+    #[command(alias = "filter")]
+    Filters {},
+    /// Run a saved filter by ID or name
+    #[command(name = "filter-run")]
+    FilterRun {
+        filter: String,
+        #[arg(long, default_value = "100")]
+        limit: u32,
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        stream: bool,
+        #[arg(long, value_delimiter = ',')]
+        fields: Option<Vec<String>>,
+        #[arg(long, value_enum, default_value = "html")]
+        format: OutputFormat,
+    },
 }
 
 #[derive(Parser)]
@@ -541,6 +559,29 @@ async fn handle_jira(
         } => jira::download_attachment(&attachment_id, output.as_deref(), config).await,
         JiraSubcommand::UserSearch { query, limit } => {
             jira::search_users(&query, limit, config).await
+        }
+        JiraSubcommand::Filters {} => jira::get_filters(config).await,
+        JiraSubcommand::FilterRun {
+            filter,
+            limit,
+            all,
+            stream,
+            fields,
+            format,
+        } => {
+            if stream && !all {
+                anyhow::bail!("--stream requires --all flag");
+            }
+            let filter_data = jira::get_filter(&filter, config).await?;
+            let jql = filter_data["jql"]
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("Filter has no JQL query"))?;
+            let as_markdown = matches!(format, OutputFormat::Markdown);
+            if all {
+                jira::search_all(jql, fields, stream, as_markdown, config).await
+            } else {
+                jira::search(jql, limit, fields, as_markdown, config).await
+            }
         }
     }
 }
